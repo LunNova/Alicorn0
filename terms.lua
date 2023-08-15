@@ -26,6 +26,164 @@
 --
 -- create metavariable, pass in as arg to lambda, get back result, unify against another type
 --   it's ok if a metavariable never gets constrained during part of typechecking
+-- give metavariables sequential ids (tracked in typechecker_state)
+
+-- metavariable state transitions, can skip steps but must always move down
+
+-- unbound
+-- vvv
+-- bound to exactly another metavariable - have a reference to a metavariable
+-- vvv
+-- bound to a value - have a reference to a value
+
+-- when binding to another metavariable bind the one with a greater index to the lesser index
+
+local free = {
+  metavariable = function(metavariable)
+    return {
+      kind = "free_metavariable",
+      metavariable = metavariable,
+    }
+  end
+}
+
+local function getmvinfo(id, mvs)
+  if mvs == nil then
+    return
+  end
+  -- if this is slow fixme later
+  return mvs[id] or getmvinfo(id, mvs.prev_mvs)
+end
+
+local metavariable_mt
+
+metavariable_mt = {
+  __index = {
+    getvalue = function(self)
+      local canonical = self:getcanonical()
+      local canonical_info = getmvinfo(canonical.id, self.typechecker_state.mvs)
+      return canonical_info.bound_value or values.free(free.metavariable(canonical))
+    end,
+    get_canonical = function(self)
+      local canonical_id = self.typechecker_state:get_canonical_id(self.id)
+
+      if canonical_id ~= self.id then
+        return setmetatable({
+            id = canonical_id,
+            typechecker_state = self.typechecker_state,
+                            }, metavariable_mt):get_canonical()
+      end
+
+      return self
+    end,
+    bind = function(self, other)
+      if getmetatable(other) == metavariable_mt then
+        self:bind_metavariable(other)
+      else
+        self:bind_value(other)
+      end
+    end,
+    bind_value = function(self, value)
+      local canonical = self:getcanonical()
+      local canonical_info = getmvinfo(canonical.id, self.typechecker_state.mvs)
+      if canonical_info.bound_value and canonical_info.bound_value ~= value then
+        error("metavariable already bound to a different value")
+      end
+      self.typechecker_state.mvs[canonical.id] = {
+        bound_value = value,
+      }
+    end,
+    bind_metavariable = function(self, other)
+      if self == other then
+        return
+      end
+
+      if getmetatable(other) ~= metavariable_mt then
+        p(self, other, getmetatable(self), getmetatable(other))
+        error("metavariable.bind should only be called with metavariable as arg")
+      end
+
+      if self.typechecker_state ~= other.typechecker_state then
+        error("trying to mix metavariables from different typechecker_states")
+      end
+
+      if self.id == other.id then
+        return
+      end
+
+      if self.id < other.id then
+        return other:bind_metavariable(self)
+      end
+
+      local this = getmvinfo(self.id, self.typechecker_state.mvs)
+      if this.bound_value then
+        error("metavariable is already bound to a value")
+      end
+
+      self.typechecker_state.mvs[self.id] = {
+        bound_mv_id = other.id,
+      }
+    end
+  }
+}
+
+local typechecker_state_mt
+typechecker_state_mt = {
+  __index = {
+    metavariable = function(self) -- -> metavariable instance
+      self.next_metavariable_id = self.next_metavariable_id + 1
+      self.mvs[self.next_metavariable_id] = {}
+      return setmetatable(
+        {
+          id = self.next_metavariable_id,
+          typechecker_state = self,
+        }, metavariable_mt)
+    end,
+    get_canonical_id = function(self, mv_id) -- -> number
+      local mvinfo = getmvinfo(mv_id, self.mvs)
+      if mvinfo.bound_mv_id then
+        local final_id = self:get_canonical_id(mvinfo.bound_mv_id)
+        if final_id ~= mvinfo.bound_mv_id then
+          -- ok to mutate rather than setting in self.mvs here as collapsing chain is idempotent
+          mvinfo.bound_mv_id = final_id
+        end
+        return final_id
+      end
+      return mv_id
+    end,
+  }
+}
+
+local function typechecker_state()
+  return setmetatable({
+      next_metavariable_id = 0,
+      mvs = { prev_mvs = nil },
+    }, typechecker_state_mt)
+end
+
+-- freeze and then commit or revert
+-- like a transaction
+local function speculate(f, ...)
+  mvs = {
+    prev_mvs = mvs,
+  }
+  local commit, result = f(...)
+  if commit then
+    -- commit
+    for k, v in pairs(mvs) do
+      if k ~= "prev_mvs" then
+        prev_mvs[k] = mvs[k]
+      end
+    end
+    mvs = mvs.prev_mvs
+    return result
+  else
+    -- revert
+    mvs = mvs.prev_mvs
+    -- intentionally don't return result if set if not committing to prevent smuggling out of execution
+    return nil
+  end
+end
 
 -- checkable terms need a target type to typecheck against
 local checkable = {
@@ -71,7 +229,14 @@ local inferrable = {
   },
   prim = {
     kind = "inferrable_prim"
-  }
+  },
+  annotated = function(annotated_term, annotated_type)
+    return {
+      kind = "inferrable_annotated",
+      annotated_term = annotated_term,
+      annotated_type = annotated_type,
+    }
+  end
 }
 -- typed terms have been typechecked but do not store their type internally
 local typed = {
@@ -165,6 +330,20 @@ local function unify(
     first_value,
     second_value)
   -- -> unified value,
+  if first_value == second_value then
+    return first_value
+  end
+
+  -- eh this doesn't seem elegant/i have designed this wrong :ded:
+  if getmetatable(first_value) == metavariable_mt then
+    first_value:bind(second_value)
+    return second_value
+  elseif getmetatable(second_value) == metavariable_mt then
+    second_value:bind(first_value)
+    return first_value
+  end
+
+  error("unknown kind to unify")
 end
 
 local function check(
@@ -261,4 +440,6 @@ return {
   typed = typed, -- {}
   evaluate = evaluate, -- fn
   values = values, -- {}
+  unify = unify, -- fn
+  typechecker_state = typechecker_state, -- fn (constructor)
 }
