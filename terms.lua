@@ -48,6 +48,8 @@ end
 
 local metavariable_mt
 
+local unify
+
 metavariable_mt = {
   __index = {
     get_value = function(self)
@@ -284,6 +286,7 @@ local free = {
   -- TODO: quoting and axiom
 }
 
+--[[
 local quantity = {
   -- none
   erased = {
@@ -298,11 +301,6 @@ local quantity = {
     kind = "quantity_unrestricted"
   },
 }
-
-local quantity = unifiable_enum {"quantity", variants = {"erased", "linear", "unrestricted"} }
-local visibility = unifiable_enum { "visibility", variants = { "explicit", "implicit" } }
-local purity = unifiable_enum {"purity", variants = {"effectful", "pure"}}
-
 
 local visbility = {
   explicit = {
@@ -321,7 +319,37 @@ local purity = {
     kind = "purity_pure",
   }
 }
+--]]
 
+--[/[
+local unifiable_simple_variant_mt = {
+  __index = {
+    unify = function(self, other)
+      if not other then
+        error("can't unify " .. self.kind .. " with nil")
+      elseif self ~= other then
+        error("can't unify " .. self.kind .. " with " .. other.kind)
+      end
+      return self
+    end,
+  }
+}
+
+local function unifiable_enum(data)
+  local name = data[1]
+  local res = {}
+  for i, v in ipairs(data.variants) do
+    res[v] = setmetatable({ kind = name .. '_' .. v }, unifiable_simple_variant_mt)
+  end
+  return res
+end
+
+local quantity = unifiable_enum {"quantity", variants = {"erased", "linear", "unrestricted"} }
+local visibility = unifiable_enum { "visibility", variants = { "explicit", "implicit" } }
+local purity = unifiable_enum {"purity", variants = {"effectful", "pure"}}
+--]]
+
+--[[
 -- WIP
 local terms = generate_records {
   quantity = enum_variants { "erased", "linear", "unrestricted", },
@@ -333,28 +361,7 @@ local terms = generate_records {
     pi = { TODO },
   },
 }
-
-local unifiable_simple_variant_mt = {
-  __index = {
-    unify = function(self, other)
-      if not other then
-        error("can't unify " .. self.kind .. " with nil")
-      if self ~= other then
-        error("can't unify " .. self.kind .. " with " .. other.kind)
-      end
-      return self
-    end,
-  }
-}
-
-local function unifiable_enum(data)
-  local name = data[0]
-  local res = {}
-  for i, v in ipairs(data.variants) do
-    res[v] = { kind = path .. '_' .. v }
-  end
-  return setmetatable(res, unifiable_simple_variant_mt)
-end
+]]
 
 -- local function record(variants, path)
 --   if variants[0] then
@@ -392,79 +399,95 @@ end
 --     },
 -- }, "value")
 
-local values = {
-  quantity = function(quantity)
-    return {
-      kind = "value_quantity",
-      quantity = quantity,
+local unifiable_mt = {
+  __index = {
+    unify = function(self, other)
+      if self.kind ~= other.kind then
+        p(self.kind, other.kind)
+        error("can't unify values of different kinds where neither is a metavariable")
+      end
+
+      local unified = {}
+      local prefer_left = true
+      local prefer_right = true
+      for _, v in ipairs(self.params) do
+        local sv = self[v]
+        local ov = other[v]
+        if sv.kind then
+          local u = unify(sv, ov)
+          unified[v] = u
+          prefer_left = prefer_left and u == sv
+          prefer_right = prefer_right and u == ov
+        elseif sv ~= ov then
+          p("unify args", self, other)
+          error("unification failure as " .. v .. " field value doesn't match")
+        end
+      end
+
+      if prefer_left then
+        return self
+      elseif prefer_right then
+        return other
+      else
+        unified.kind = self.kind
+        return unified
+      end
+    end
+  }
+}
+
+local function gen_simple_value(name)
+  local val = {
+    kind = "value_" .. name,
+    params = {},
+  }
+  setmetatable(val, unifiable_mt)
+  return val
+end
+
+local function gen_param_value(name, params)
+  return function(...)
+    local args = { ... }
+    local val = {
+      kind = "value_" .. name,
+      params = params,
     }
-  end,
-  visibility = function(visibility)
-    return {
-      kind = "value_visibility",
-      visibility = visibility,
-    }
-  end,
-  arginfo = function(
-      quantity, -- erased, linear, unrestricted / none, one, many
-      visibility -- explicit, implicit,
-                    )
-    return {
-      kind = "value_arginfo",
-      quantity = quantity,
-      visibility = visibility,
-    }
-  end,
-  resultinfo = function(purity) -- whether or not a function is effectful /
-    -- for a function returning a monad do i have to be called in an effectful context or am i pure
-    return {
-      kind = "value_resinfo",
-      purity = purity,
-    }
-  end,
-  pi = function(
-      argtype,
-      arginfo, -- info about the argument (is it implicit / what are the usage restrictions?)
-      resulttype,
-      resultinfo)
-    return {
-      kind = "value_pi",
-      argtype = argtype,
-      arginfo = arginfo,
-      resulttype = resulttype,
-      resultinfo = resultinfo,
-    }
-  end,
-  -- closure is a type that contains a typed term corresponding to the body
-  -- and a runtime context representng the bound context where the closure was created
-  closure = function()
-      -- TODO
-  end,
-  level_type = {
-    kind = "value_level_type",
-  },
-  level = function(level) -- the level number
-      return {
-        kind = "value_level",
-        level = level,
-      }
-  end,
-  star = function(level) -- the level number
-      return {
-        kind = "value_star",
-        level = level,
-      }
-  end,
-  prop = function(level) -- the level number
-      return {
-        kind = "value_prop",
-        level = level,
-      }
-  end,
-  prim = {
-      kind = "value_prim",
-  },
-  free = {}, -- fn(free_value) and table of functions eg free.metavariable(metavariable)
+    for i, v in ipairs(params) do
+      val[v] = args[i]
+    end
+    setmetatable(val, unifiable_mt)
+    return val
+  end
+end
+
+local function gen_values(data)
+  local values = {}
+  for k, v in pairs(data) do
+    local kt = type(k)
+    local vt = type(v)
+    if kt == "number" and vt == "string" then
+      values[v] = gen_simple_value(v)
+    elseif kt == "string" and vt == "table" then
+      values[k] = gen_param_value(k, v)
+    else
+      error("gen_values: expected a string or a named sequence of strings, got " .. t)
+    end
+  end
+  return values
+end
+
+local values = gen_values {
+  quantity = {"quantity"},
+  visibility = {"visibility"},
+  arginfo = {"quantity", "visibility"},
+  resultinfo = {"purity"},
+  pi = {"argtype", "arginfo", "resulttype", "resultinfo"},
+  closure = {}, -- TODO
+  "level_type",
+  level = {"level"},
+  star = {"level"},
+  prop = {"level"},
+  "prim",
 }
 
 values.free = setmetatable({}, {
@@ -486,7 +509,7 @@ local function extract_value_metavariable(value) -- -> Option<metavariable>
   return nil
 end
 
-local function unify(
+unify = function(
     first_value,
     second_value)
   -- -> unified value,
@@ -506,32 +529,7 @@ local function unify(
     return unify(second_mv:bind_value(first_value), first_value)
   end
 
-  if first_value.kind ~= second_value.kind then
-    p(first_value.kind, second_value.kind)
-    error("can't unify values of different kinds where neither is a metavariable")
-  end
-
-  -- FIXME: unify method that we can call that is generated above
-  -- don't keep this janky auto unify thingy
-  local unified = {}
-  local need_fresh = false
-  for k, v in pairs(first_value) do
-    if k == "kind" then
-      -- handled above with explicit kind check
-    elseif v and v.kind then
-      unified[k] = unify(v, second_value[k])
-      need_fresh = need_fresh or unified[k] ~= v
-    elseif v ~= second_value[k] then
-      p("unify args", first_value, second_value)
-      error("unification failure as " .. k .. " field value doesn't match")
-    end
-  end
-
-  if need_fresh then
-    return unified
-  end
-
-  return first_value
+  return first_value:unify(second_value)
 end
 
 local function check(
@@ -630,4 +628,7 @@ return {
   values = values, -- {}
   unify = unify, -- fn
   typechecker_state = typechecker_state, -- fn (constructor)
+  quantity = quantity,
+  visibility = visibility,
+  purity = purity,
 }

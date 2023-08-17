@@ -76,8 +76,31 @@ function test_unify_more_metavariables()
   assert(mv_b:get_value() == terms.values.level_type)
 end
 
+function test_unify_2()
+  local level_type = terms.values.level_type
+  local prim = terms.values.prim
+  --local unified_1 = terms.unify(level_type, prim)
+  -- TODO: how to test that a lua error correctly happens?
+
+  local tcs = terms.typechecker_state()
+  local mv_a = tcs:metavariable()
+  local mv_b = tcs:metavariable()
+  local resultinfo = terms.values.resultinfo
+  local freemeta = terms.values.free.metavariable
+  local resinfo_a = resultinfo(freemeta(mv_a))
+  local resinfo_b = resultinfo(freemeta(mv_b))
+  local resinfo_effectful = resultinfo(terms.purity.effectful)
+  local resinfo_pure = resultinfo(terms.purity.pure)
+  local unified_2 = terms.unify(resinfo_a, resinfo_effectful)
+  p(unified_2, mv_a)
+  assert(unified_2 == resinfo_effectful)
+  --local unified_3 = terms.unify(resinfo_a, resinfo_pure)
+end
+
 
 test_levels()
 test_star()
 test_metavariable_bind_to_other_mv()
+test_unify()
 test_unify_more_metavariables()
+test_unify_2()
