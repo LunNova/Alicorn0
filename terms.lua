@@ -299,6 +299,11 @@ local quantity = {
   },
 }
 
+local quantity = unifiable_enum {"quantity", variants = {"erased", "linear", "unrestricted"} }
+local visibility = unifiable_enum { "visibility", variants = { "explicit", "implicit" } }
+local purity = unifiable_enum {"purity", variants = {"effectful", "pure"}}
+
+
 local visbility = {
   explicit = {
     kind = "visibility_explicit",
@@ -317,17 +322,23 @@ local purity = {
   }
 }
 
-local function simple_variant_table(variants, path)
-  local res = {}
-  for i, v in ipairs(variants) do
-    res[v] = { kind = path .. v }
-  end
-  return res
-end
+-- WIP
+local terms = generate_records {
+  quantity = enum_variants { "erased", "linear", "unrestricted", },
+  visibility = enum_variants { "explicit", "implicit", },
+  purity = enum_variants { "effectful", "pure", },
+
+  values = unifiable {
+    arg_info = { TODO },
+    pi = { TODO },
+  },
+}
 
 local unifiable_simple_variant_mt = {
   __index = {
     unify = function(self, other)
+      if not other then
+        error("can't unify " .. self.kind .. " with nil")
       if self ~= other then
         error("can't unify " .. self.kind .. " with " .. other.kind)
       end
@@ -335,6 +346,15 @@ local unifiable_simple_variant_mt = {
     end,
   }
 }
+
+local function unifiable_enum(data)
+  local name = data[0]
+  local res = {}
+  for i, v in ipairs(data.variants) do
+    res[v] = { kind = path .. '_' .. v }
+  end
+  return setmetatable(res, unifiable_simple_variant_mt)
+end
 
 -- local function record(variants, path)
 --   if variants[0] then
