@@ -38,15 +38,6 @@
 
 -- when binding to another metavariable bind the one with a greater index to the lesser index
 
-local free = {
-  metavariable = function(metavariable)
-    return {
-      kind = "free_metavariable",
-      metavariable = metavariable,
-    }
-  end
-}
-
 local function getmvinfo(id, mvs)
   if mvs == nil then
     return
@@ -59,8 +50,8 @@ local metavariable_mt
 
 metavariable_mt = {
   __index = {
-    getvalue = function(self)
-      local canonical = self:getcanonical()
+    get_value = function(self)
+      local canonical = self:get_canonical()
       local canonical_info = getmvinfo(canonical.id, self.typechecker_state.mvs)
       return canonical_info.bound_value or values.free(free.metavariable(canonical))
     end,
@@ -76,22 +67,19 @@ metavariable_mt = {
 
       return self
     end,
-    bind = function(self, other)
-      if getmetatable(other) == metavariable_mt then
-        self:bind_metavariable(other)
-      else
-        self:bind_value(other)
-      end
-    end,
+    -- this gets called to bind to any value that isn't another metavariable
     bind_value = function(self, value)
-      local canonical = self:getcanonical()
+      -- FIXME: if value is a metavariable (free w/ metavariable) call bind_metavariable here?
+      local canonical = self:get_canonical()
       local canonical_info = getmvinfo(canonical.id, self.typechecker_state.mvs)
       if canonical_info.bound_value and canonical_info.bound_value ~= value then
-        error("metavariable already bound to a different value")
+        -- unify the two values, throws lua error if can't
+        value = unify(canonical_info.bound_value, value)
       end
       self.typechecker_state.mvs[canonical.id] = {
         bound_value = value,
       }
+      return value
     end,
     bind_metavariable = function(self, other)
       if self == other then
@@ -281,18 +269,150 @@ local typed = {
     kind = "typed_prim",
   },
 }
+
+local free = {
+  metavariable = function(metavariable)
+    if getmetatable(metavariable) ~= metavariable_mt then
+      p("free.metavariable arg", metavariable)
+      error("not a metavariable")
+    end
+    return {
+      kind = "free_metavariable",
+      metavariable = metavariable,
+    }
+  end,
+  -- TODO: quoting and axiom
+}
+
+local quantity = {
+  -- none
+  erased = {
+    kind = "quantity_erased"
+  },
+  -- one
+  linear = {
+    kind = "quantity_linear"
+  },
+  -- many
+  unrestricted = {
+    kind = "quantity_unrestricted"
+  },
+}
+
+local visbility = {
+  explicit = {
+    kind = "visibility_explicit",
+  },
+  implicit = {
+    kind = "visibility_implicit",
+  },
+}
+
+local purity = {
+  effectful = {
+    kind = "purity_effectful",
+  },
+  pure = {
+    kind = "purity_pure",
+  }
+}
+
+local function simple_variant_table(variants, path)
+  local res = {}
+  for i, v in ipairs(variants) do
+    res[v] = { kind = path .. v }
+  end
+  return res
+end
+
+local unifiable_simple_variant_mt = {
+  __index = {
+    unify = function(self, other)
+      if self ~= other then
+        error("can't unify " .. self.kind .. " with " .. other.kind)
+      end
+      return self
+    end,
+  }
+}
+
+-- local function record(variants, path)
+--   if variants[0] then
+--     return setmetatable(variant_table(variants, path), unifiable_simple_variant_mt)
+--   end
+
+-- end
+
+-- local values = record({
+--     pi = {
+--       arg_type = value(),
+--       arg_info = "arg_info",
+--     },
+--     arg_info = {
+--       quantity = {
+--         "erased",
+--         "linear",
+--         "unrestricted",
+--       },
+--       visibility = {
+--         "explicit",
+--         "implicit",
+--       },
+--     },
+--     result_info = {
+--       purity = {
+--         "pure",
+--         "effectful",
+--       },
+--     },
+--     free = {
+--       metavariable = {},
+--       -- TODO quoting
+--       -- TODO axiom
+--     },
+-- }, "value")
+
 local values = {
+  quantity = function(quantity)
+    return {
+      kind = "value_quantity",
+      quantity = quantity,
+    }
+  end,
+  visibility = function(visibility)
+    return {
+      kind = "value_visibility",
+      visibility = visibility,
+    }
+  end,
+  arginfo = function(
+      quantity, -- erased, linear, unrestricted / none, one, many
+      visibility -- explicit, implicit,
+                    )
+    return {
+      kind = "value_arginfo",
+      quantity = quantity,
+      visibility = visibility,
+    }
+  end,
+  resultinfo = function(purity) -- whether or not a function is effectful /
+    -- for a function returning a monad do i have to be called in an effectful context or am i pure
+    return {
+      kind = "value_resinfo",
+      purity = purity,
+    }
+  end,
   pi = function(
       argtype,
-      arginfo,
-      restype,
-      resinfo)
+      arginfo, -- info about the argument (is it implicit / what are the usage restrictions?)
+      resulttype,
+      resultinfo)
     return {
-      kind = "pi",
+      kind = "value_pi",
       argtype = argtype,
       arginfo = arginfo,
-      restype = restype,
-      resinfo = resinfo,
+      resulttype = resulttype,
+      resultinfo = resultinfo,
     }
   end,
   -- closure is a type that contains a typed term corresponding to the body
@@ -324,7 +444,27 @@ local values = {
   prim = {
       kind = "value_prim",
   },
+  free = {}, -- fn(free_value) and table of functions eg free.metavariable(metavariable)
 }
+
+values.free = setmetatable({}, {
+    __call = function(self, free_value) -- value should be constructed w/ free.something()
+      return {
+        kind = "value_free",
+        free_value = free_value,
+      }
+    end,
+})
+values.free.metavariable = function(mv)
+  return values.free(free.metavariable(mv))
+end
+
+local function extract_value_metavariable(value) -- -> Option<metavariable>
+  if value.kind == "value_free" and value.free_value.kind == "free_metavariable" then
+    return value.free_value.metavariable
+  end
+  return nil
+end
 
 local function unify(
     first_value,
@@ -334,16 +474,44 @@ local function unify(
     return first_value
   end
 
-  -- eh this doesn't seem elegant/i have designed this wrong :ded:
-  if getmetatable(first_value) == metavariable_mt then
-    first_value:bind(second_value)
-    return second_value
-  elseif getmetatable(second_value) == metavariable_mt then
-    second_value:bind(first_value)
-    return first_value
+  local first_mv = extract_value_metavariable(first_value)
+  local second_mv = extract_value_metavariable(second_value)
+
+  if first_mv and second_mv then
+    first_mv:bind_metavariable(second_mv)
+    return first_mv:get_canonical()
+  elseif first_mv then
+    return unify(first_mv:bind_value(second_value), second_value)
+  elseif second_mv then
+    return unify(second_mv:bind_value(first_value), first_value)
   end
 
-  error("unknown kind to unify")
+  if first_value.kind ~= second_value.kind then
+    p(first_value.kind, second_value.kind)
+    error("can't unify values of different kinds where neither is a metavariable")
+  end
+
+  -- FIXME: unify method that we can call that is generated above
+  -- don't keep this janky auto unify thingy
+  local unified = {}
+  local need_fresh = false
+  for k, v in pairs(first_value) do
+    if k == "kind" then
+      -- handled above with explicit kind check
+    elseif v and v.kind then
+      unified[k] = unify(v, second_value[k])
+      need_fresh = need_fresh or unified[k] ~= v
+    elseif v ~= second_value[k] then
+      p("unify args", first_value, second_value)
+      error("unification failure as " .. k .. " field value doesn't match")
+    end
+  end
+
+  if need_fresh then
+    return unified
+  end
+
+  return first_value
 end
 
 local function check(

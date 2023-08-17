@@ -39,6 +39,45 @@ function test_metavariable_bind_to_other_mv()
   assert(tcs.mvs[mv_c.id].bound_mv_id == mv_a.id)
 end
 
+function test_unify()
+  local tcs = terms.typechecker_state()
+
+  local mv_a = tcs:metavariable()
+  local free_mv_a = terms.values.free.metavariable(mv_a)
+  p(mv_a, free_mv_a)
+
+  local unified = terms.unify(free_mv_a, terms.values.level_type)
+  assert(unified == terms.values.level_type)
+  assert(mv_a:get_value() == terms.values.level_type)
+end
+
+function test_unify_more_metavariables()
+  local tcs = terms.typechecker_state()
+
+  -- terms.values.free.metavariable(...)
+  -- terms.values.free.axiom(...)
+  -- VS
+  -- terms.values.free(terms.free.metavariable(...))
+
+  local mv_a = tcs:metavariable()
+  local mv_b = tcs:metavariable()
+  p('mv_a', mv_a)
+  local free_mv_a = terms.values.free.metavariable(mv_a)
+  local free_mv_b = terms.values.free.metavariable(mv_b)
+  p(mv_a, free_mv_a)
+
+  terms.unify(free_mv_b, free_mv_a)
+  assert(mv_b:get_canonical().id == mv_a.id)
+
+  local unified = terms.unify(free_mv_a, terms.values.level_type)
+  assert(unified == terms.values.level_type)
+  assert(mv_a:get_value() == terms.values.level_type)
+
+  assert(mv_b:get_value() == terms.values.level_type)
+end
+
+
 test_levels()
 test_star()
 test_metavariable_bind_to_other_mv()
+test_unify_more_metavariables()
