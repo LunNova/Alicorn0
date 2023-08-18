@@ -1,7 +1,9 @@
+-- get new version of let and do working with terms
 
 local metalanguage = require './metalanguage'
 -- local conexpr = require './contextual-exprs'
 local types = require './typesystem'
+local terms = require './terms'
 
 local p = require 'pretty-print'.prettyPrint
 
@@ -33,48 +35,54 @@ for k, v in pairs(semantic_error) do
   semantic_error[k] = function(...) return setmetatable(v(...), semantic_error_mt) end
 end
 
-local evaluates
+local expressions
 
 local operate_behavior = {}
 
-local function evaluate_pairhandler(env, a, b)
-  local ok, combiner, env = a:match({evaluates(metalanguage.accept_handler, env)}, metalanguage.failure_handler, nil)
+local function expression_pairhandler(env, a, b)
+  local ok, combiner, env = a:match({expressions(metalanguage.accept_handler, env)}, metalanguage.failure_handler, nil)
   if not ok then return false, combiner end
   if not operate_behavior[combiner.type.kind] then return false, semantic_error.non_operable_combiner(combiner.type) end
   return operate_behavior[combiner.type.kind](combiner, b, env)
 end
-local function evaluate_symbolhandler(env, name)
+
+local function expression_symbolhandler(env, name)
   --print("looking up symbol", name)
   --p(env)
   local ok, val = env:get(name)
   return ok, val, env
 end
-local function evaluate_valuehandler(env, val)
-  return true, val, env
+
+local function expression_valuehandler(env, val)
+  if val.type == "f64" then
+    return true, terms.inferred.typed(terms.value.number_type, terms.typed.literal(val.val)), env
+  end
+  p("valuehandler error", val)
+  error("unknown value type " .. val.type)
 end
 
-evaluates =
+expressions =
   metalanguage.reducer(
     function(syntax, _, environment)
-      -- print('trying to evaluate', syntax)
+      -- print('trying to expression', syntax)
       return syntax:match(
         {
-          metalanguage.ispair(evaluate_pairhandler),
-          metalanguage.issymbol(evaluate_symbolhandler),
-          metalanguage.isvalue(evaluate_valuehandler)
+          metalanguage.ispair(expression_pairhandler),
+          metalanguage.issymbol(expression_symbolhandler),
+          metalanguage.isvalue(expression_valuehandler)
         },
         metalanguage.failure_handler,
         environment
       )
     end,
-    "evaluates"
+    "expressions"
   )
 
 -- local constexpr =
 --   metalanguage.reducer(
 --     function(syntax, environment)
 --       local ok, val =
---         syntax:match({evaluates(metalanguage.accept_handler, environment)}, metalanguage.failure_handler, nil)
+--         syntax:match({expressions(metalanguage.accept_handler, environment)}, metalanguage.failure_handler, nil)
 --       if not ok then return false, val end
 --       return val:asconstant()
 --     enfoundendd
@@ -96,7 +104,7 @@ local function primitive_operative(fn)
 end
 
 local function collect_tuple_pair_handler(env, a, b)
-  local ok, val, env = a:match({evaluates(metalanguage.accept_handler, env)}, metalanguage.failure_handler, nil)
+  local ok, val, env = a:match({expressions(metalanguage.accept_handler, env)}, metalanguage.failure_handler, nil)
   if not ok then return false, val end
   return true, true, val, b, env
 end
@@ -126,7 +134,7 @@ local collect_tuple = metalanguage.reducer(function(syntax, _, env)
     return true, {val = tuple_val, type = tuple_t}, env
 end, "collect_tuple")
 
-local evaluates_args = metalanguage.reducer(function(syntax, _, env)
+local expressions_args = metalanguage.reducer(function(syntax, _, env)
     local vals = {}
     local ok, continue = true, true
     while ok and continue do
@@ -141,7 +149,7 @@ local evaluates_args = metalanguage.reducer(function(syntax, _, env)
     end
     if not ok then return false, continue end
     return true, vals, env
-end, "evaluates_args")
+end, "expressions_args")
 
 local block = metalanguage.reducer(function(syntax, _, env)
     local lastval, newval
@@ -188,21 +196,21 @@ end
 
 
 local function eval(syntax, environment)
-  return syntax:match({evaluates(metalanguage.accept_handler, environment)}, metalanguage.failure_handler, nil)
+  return syntax:match({expressions(metalanguage.accept_handler, environment)}, metalanguage.failure_handler, nil)
 end
 local function eval_block(syntax, environment)
   return syntax:match({block(metalanguage.accept_handler, environment)}, metalanguage.failure_handler, nil)
 end
 
 return {
-  evaluates = evaluates,
+  expressions = expressions,
   -- constexpr = constexpr
   block = block,
   primitive_operative = primitive_operative,
   primitive_applicative = primitive_applicative,
   define_operate = define_operate,
   collect_tuple = collect_tuple,
-  evaluates_args = evaluates_args,
+  expressions_args = expressions_args,
   eval = eval,
   eval_block = eval_block
 }

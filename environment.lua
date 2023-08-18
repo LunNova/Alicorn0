@@ -1,3 +1,11 @@
+-- runtime context
+-- fibonacci buffer. don't need names or type info stores, stores values - values are the thingies in terms.lua
+-- captured by closers
+--
+-- typechecking context
+--   its own runtime context
+--   interacts with metavariables and has knowledge of what names are
+
 local trie = require './lazy-prefix-tree'
 local types = require './typesystem'
 
@@ -87,6 +95,7 @@ function new_env(opts)
   self.bindings = self.nonlocals:extend(self.locals)
   self.carrier = opts.carrier or nil
   self.perms = opts.perms or {}
+  self.typechecking_context = opts.typechecking_context or {}
   return setmetatable(self, environment_mt)
 end
 

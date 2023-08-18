@@ -218,6 +218,14 @@ local inferrable = {
   prim = {
     kind = "inferrable_prim"
   },
+  typed = function(type, typed_term)
+    return {
+      kind = "inferrable_typed",
+      -- TODO: more info from context
+      type = type,
+      typed_term = typed_term,
+    },
+  end
   annotated = function(annotated_term, annotated_type)
     return {
       kind = "inferrable_annotated",
@@ -268,6 +276,12 @@ local typed = {
   prim = {
     kind = "typed_prim",
   },
+  literal = function(literal_value)
+    return {
+      kind = "typed_literal",
+      literal_value = literal_value,
+    }
+  end,
 }
 
 local free = {
@@ -443,6 +457,15 @@ local values = {
   level_type = {
     kind = "value_level_type",
   },
+  number_type = {
+    kind = "value_number_type",
+  },
+  number = function(number)
+    return {
+      kind = "value_number",
+      number = number,
+    }
+  end,
   level = function(level) -- the level number
       return {
         kind = "value_level",
