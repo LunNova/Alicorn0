@@ -289,118 +289,6 @@ local free = {
   -- TODO: quoting and axiom
 }
 
---[[
-local quantity = {
-  -- none
-  erased = {
-    kind = "quantity_erased"
-  },
-  -- one
-  linear = {
-    kind = "quantity_linear"
-  },
-  -- many
-  unrestricted = {
-    kind = "quantity_unrestricted"
-  },
-}
-
-local visbility = {
-  explicit = {
-    kind = "visibility_explicit",
-  },
-  implicit = {
-    kind = "visibility_implicit",
-  },
-}
-
-local purity = {
-  effectful = {
-    kind = "purity_effectful",
-  },
-  pure = {
-    kind = "purity_pure",
-  }
-}
-
--- WIP
-local terms = generate_records {
-  quantity = enum_variants { "erased", "linear", "unrestricted", },
-  visibility = enum_variants { "explicit", "implicit", },
-  purity = enum_variants { "effectful", "pure", },
-
-  values = unifiable {
-    arg_info = { TODO },
-    pi = { TODO },
-  },
-}
---]]
-
-local function simple_variant_unify_fn(self, other)
-  if not other then
-    error("can't unify " .. self.kind .. " with nil")
-  elseif self ~= other then
-    error("can't unify " .. self.kind .. " with " .. other.kind)
-  end
-  return self
-end
-
-local function unifiable_enum(name, mt, variants)
-  mt.__unify = simple_variant_unify_fn
-  local res = {}
-  for _, v in ipairs(variants) do
-    local var = {
-      kind = name .. '_' .. v,
-    }
-    setmetatable(var, mt)
-    res[v] = var
-  end
-  return res
-end
-
-local quantity_mt = {}
-local quantity = unifiable_enum("quantity", quantity_mt, {"erased", "linear", "unrestricted"})
-local visibility_mt = {}
-local visibility = unifiable_enum("visibility", visibility_mt, {"explicit", "implicit"})
-local purity_mt = {}
-local purity = unifiable_enum("purity", purity_mt, {"effectful", "pure"})
-
--- local function record(variants, path)
---   if variants[0] then
---     return setmetatable(variant_table(variants, path), unifiable_simple_variant_mt)
---   end
-
--- end
-
--- local values = record({
---     pi = {
---       arg_type = value(),
---       arg_info = "arg_info",
---     },
---     arg_info = {
---       quantity = {
---         "erased",
---         "linear",
---         "unrestricted",
---       },
---       visibility = {
---         "explicit",
---         "implicit",
---       },
---     },
---     result_info = {
---       purity = {
---         "pure",
---         "effectful",
---       },
---     },
---     free = {
---       metavariable = {},
---       -- TODO quoting
---       -- TODO axiom
---     },
--- }, "value")
-
 local function extract_value_metavariable(value) -- -> Option<metavariable>
   if value.kind == "value_free" and value.free_value.kind == "free_metavariable" then
     return value.free_value.metavariable
@@ -459,6 +347,77 @@ local function gen_unify_fn(params)
   end
 end
 
+local function check_arg_against_param(param, arg)
+  local param_t = type(param)
+  if param_t == "nil" then
+    -- no checking
+  elseif param_t == "string" then
+    local arg_t = type(arg)
+    if arg_t ~= param then
+      p("p", arg)
+      error("wrong argument type passed to value constructor")
+    end
+  elseif param_t == "table" then
+    local arg_mt = getmetatable(arg)
+    if arg_mt ~= param and extract_value_metavariable(arg) == nil then
+      p("mt", arg)
+      error("wrong argument type passed to value constructor")
+    end
+  else
+    p(param)
+    error("invalid parameter type found while checking argument types in value constructor")
+  end
+end
+
+local function gen_param_value(kind, mt, params, params_types)
+  mt.__unify = gen_unify_fn(params)
+  return function(...)
+    local args = { ... }
+    local val = {
+      kind = kind,
+    }
+    for i, v in ipairs(params) do
+      local argi = args[i]
+      if params_types then
+        check_arg_against_param(params_types[i], argi)
+      end
+      val[v] = argi
+    end
+    setmetatable(val, mt)
+    return val
+  end
+end
+
+local function gen_simple_value(kind, mt)
+  mt.__unify = gen_unify_fn{}
+  local val = {
+    kind = kind,
+  }
+  setmetatable(val, mt)
+  return val
+end
+
+local function gen_enum(name, mt, variants, variants_types)
+  local res = {}
+  for i, v in ipairs(variants) do
+    local kind = name .. "_" .. v
+    local vt = variants_types[i]
+    if vt then
+      res[v] = gen_param_value(kind, mt, {"arg"}, {vt})
+    else
+      res[v] = gen_simple_value(kind, mt)
+    end
+  end
+  return res
+end
+
+local quantity_mt = {}
+local quantity = gen_enum("quantity", quantity_mt, {"erased", "linear", "unrestricted"}, {nil, nil, nil})
+local visibility_mt = {}
+local visibility = gen_enum("visibility", visibility_mt, {"explicit", "implicit"}, {nil, nil})
+local purity_mt = {}
+local purity = gen_enum("purity", purity_mt, {"effectful", "pure"}, {nil, nil})
+
 local values_mts = {
   quantity = {},
   visibility = {},
@@ -474,77 +433,27 @@ local values_mts = {
   free = {},
 }
 
-local function gen_simple_value(name)
-  values_mts[name].__unify = gen_unify_fn{}
-  local val = {
-    kind = "value_" .. name,
-  }
-  setmetatable(val, values_mts[name])
-  return val
-end
-
-local function check_arg_against_param(param, arg)
-  local param_t = type(param)
-  if param_t == "nil" then
-    -- no checking
-  elseif param_t == "string" then
-    local arg_t = type(arg)
-    if arg_t ~= param then
-      p("p", arg)
-      error("wrong argument type passed to value constructor")
-    end
-  elseif param_t == "table" then
-    local arg_mt = getmetatable(arg)
-    if arg_mt ~= param and arg_mt ~= values_mts.free then
-      p("mt", arg)
-      error("wrong argument type passed to value constructor")
-    end
-  else
-    p(param)
-    error("invalid parameter type found while checking argument types in value constructor")
-  end
-end
-
-local function gen_param_value(name, params, params_types)
-  values_mts[name].__unify = gen_unify_fn(params)
-  return function(...)
-    local args = { ... }
-    local val = {
-      kind = "value_" .. name,
-    }
-    for i, v in ipairs(params) do
-      local argi = args[i]
-      if params_types then
-        check_arg_against_param(params_types[i], argi)
-      end
-      val[v] = argi
-    end
-    setmetatable(val, values_mts[name])
-    return val
-  end
-end
-
 -- NOTE!!! if you misspell a metatable name, it'll be nil
 -- and will pass constructor typechecking unconditionally
 local values = {
   -- erased, linear, unrestricted / none, one, many
-  quantity = gen_param_value("quantity", {"quantity"}, {quantity_mt}),
+  quantity = gen_param_value("value_quantity", values_mts.quantity, {"quantity"}, {quantity_mt}),
   -- explicit, implicit,
-  visibility = gen_param_value("visibility", {"visibility"}, {visibility_mt}),
+  visibility = gen_param_value("value_visibility", values_mts.visibility, {"visibility"}, {visibility_mt}),
   -- info about the argument (is it implicit / what are the usage restrictions?)
-  arginfo = gen_param_value("arginfo", {"quantity", "visibility"}, {values_mts.quantity, values_mts.visibility}),
+  arginfo = gen_param_value("value_arginfo", values_mts.arginfo, {"quantity", "visibility"}, {values_mts.quantity, values_mts.visibility}),
   -- whether or not a function is effectful /
   -- for a function returning a monad do i have to be called in an effectful context or am i pure
-  resultinfo = gen_param_value("resultinfo", {"purity"}, {purity_mt}),
-  pi = gen_param_value("pi", {"argtype", "arginfo", "resulttype", "resultinfo"}, {nil, values_mts.arginfo, nil, values_mts.resultinfo}),
+  resultinfo = gen_param_value("value_resultinfo", values_mts.resultinfo, {"purity"}, {purity_mt}),
+  pi = gen_param_value("value_pi", values_mts.pi, {"argtype", "arginfo", "resulttype", "resultinfo"}, {nil, values_mts.arginfo, nil, values_mts.resultinfo}),
   -- closure is a type that contains a typed term corresponding to the body
   -- and a runtime context representng the bound context where the closure was created
-  closure = gen_param_value("closure", {}), -- TODO
-  level_type = gen_simple_value("level_type"),
-  level = gen_param_value("level", {"level"}, {"number"}),
-  star = gen_param_value("star", {"level"}, {"number"}),
-  prop = gen_param_value("prop", {"level"}, {"number"}),
-  prim = gen_simple_value("prim"),
+  closure = gen_param_value("value_closure", values_mts.closure, {}), -- TODO
+  level_type = gen_simple_value("value_level_type", values_mts.level_type),
+  level = gen_param_value("value_level", values_mts.level, {"level"}, {"number"}),
+  star = gen_param_value("value_star", values_mts.star, {"level"}, {"number"}),
+  prop = gen_param_value("value_prop", values_mts.prop, {"level"}, {"number"}),
+  prim = gen_simple_value("value_prim", values_mts.prim),
 }
 
 local function discard_self(fn)
@@ -555,7 +464,7 @@ end
 
 -- fn(free_value) and table of functions eg free.metavariable(metavariable)
 values.free = setmetatable({}, {
-    __call = discard_self(gen_param_value("free", {"free_value"}, {nil})) -- value should be constructed w/ free.something()
+    __call = discard_self(gen_param_value("value_free", values_mts.free, {"free_value"}, {nil})) -- value should be constructed w/ free.something()
 })
 values.free.metavariable = function(mv)
   return values.free(free.metavariable(mv))
