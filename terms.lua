@@ -336,30 +336,34 @@ local terms = generate_records {
 }
 --]]
 
-local unifiable_simple_variant_mt = {
-  __unify = function(self, other)
-    if not other then
-      error("can't unify " .. self.kind .. " with nil")
-    elseif self ~= other then
-      error("can't unify " .. self.kind .. " with " .. other.kind)
-    end
-    return self
-  end,
-}
+local function simple_variant_unify_fn(self, other)
+  if not other then
+    error("can't unify " .. self.kind .. " with nil")
+  elseif self ~= other then
+    error("can't unify " .. self.kind .. " with " .. other.kind)
+  end
+  return self
+end
 
-local function unifiable_enum(data)
-  local name = data[1]
+local function unifiable_enum(name, mt, variants)
+  mt.__unify = simple_variant_unify_fn
   local res = {}
-  for i, v in ipairs(data.variants) do
-    res[v] = { kind = name .. '_' .. v }
-    setmetatable(res[v], unifiable_simple_variant_mt)
+  for _, v in ipairs(variants) do
+    local var = {
+      kind = name .. '_' .. v,
+    }
+    setmetatable(var, mt)
+    res[v] = var
   end
   return res
 end
 
-local quantity = unifiable_enum {"quantity", variants = {"erased", "linear", "unrestricted"} }
-local visibility = unifiable_enum { "visibility", variants = { "explicit", "implicit" } }
-local purity = unifiable_enum {"purity", variants = {"effectful", "pure"}}
+local quantity_mt = {}
+local quantity = unifiable_enum("quantity", quantity_mt, {"erased", "linear", "unrestricted"})
+local visibility_mt = {}
+local visibility = unifiable_enum("visibility", visibility_mt, {"explicit", "implicit"})
+local purity_mt = {}
+local purity = unifiable_enum("purity", purity_mt, {"effectful", "pure"})
 
 -- local function record(variants, path)
 --   if variants[0] then
@@ -479,7 +483,29 @@ local function gen_simple_value(name)
   return val
 end
 
-local function gen_param_value(name, params)
+local function check_arg_against_param(param, arg)
+  local param_t = type(param)
+  if param_t == "nil" then
+    -- no checking
+  elseif param_t == "string" then
+    local arg_t = type(arg)
+    if arg_t ~= param then
+      p("p", arg)
+      error("wrong argument type passed to value constructor")
+    end
+  elseif param_t == "table" then
+    local arg_mt = getmetatable(arg)
+    if arg_mt ~= param and arg_mt ~= values_mts.free then
+      p("mt", arg)
+      error("wrong argument type passed to value constructor")
+    end
+  else
+    p(param)
+    error("invalid parameter type found while checking argument types in value constructor")
+  end
+end
+
+local function gen_param_value(name, params, params_types)
   values_mts[name].__unify = gen_unify_fn(params)
   return function(...)
     local args = { ... }
@@ -487,48 +513,38 @@ local function gen_param_value(name, params)
       kind = "value_" .. name,
     }
     for i, v in ipairs(params) do
-      val[v] = args[i]
+      local argi = args[i]
+      if params_types then
+        check_arg_against_param(params_types[i], argi)
+      end
+      val[v] = argi
     end
     setmetatable(val, values_mts[name])
     return val
   end
 end
 
-local function gen_values(data)
-  local values = {}
-  for k, v in pairs(data) do
-    local kt = type(k)
-    local vt = type(v)
-    if kt == "number" and vt == "string" then
-      values[v] = gen_simple_value(v)
-    elseif kt == "string" and vt == "table" then
-      values[k] = gen_param_value(k, v)
-    else
-      error("gen_values: expected a string or a named sequence of strings, got " .. t)
-    end
-  end
-  return values
-end
-
-local values = gen_values {
+-- NOTE!!! if you misspell a metatable name, it'll be nil
+-- and will pass constructor typechecking unconditionally
+local values = {
   -- erased, linear, unrestricted / none, one, many
-  quantity = {"quantity"},
+  quantity = gen_param_value("quantity", {"quantity"}, {quantity_mt}),
   -- explicit, implicit,
-  visibility = {"visibility"},
+  visibility = gen_param_value("visibility", {"visibility"}, {visibility_mt}),
   -- info about the argument (is it implicit / what are the usage restrictions?)
-  arginfo = {"quantity", "visibility"},
+  arginfo = gen_param_value("arginfo", {"quantity", "visibility"}, {values_mts.quantity, values_mts.visibility}),
   -- whether or not a function is effectful /
   -- for a function returning a monad do i have to be called in an effectful context or am i pure
-  resultinfo = {"purity"},
-  pi = {"argtype", "arginfo", "resulttype", "resultinfo"},
+  resultinfo = gen_param_value("resultinfo", {"purity"}, {purity_mt}),
+  pi = gen_param_value("pi", {"argtype", "arginfo", "resulttype", "resultinfo"}, {nil, values_mts.arginfo, nil, values_mts.resultinfo}),
   -- closure is a type that contains a typed term corresponding to the body
   -- and a runtime context representng the bound context where the closure was created
-  closure = {}, -- TODO
-  "level_type",
-  level = {"level"},
-  star = {"level"},
-  prop = {"level"},
-  "prim",
+  closure = gen_param_value("closure", {}), -- TODO
+  level_type = gen_simple_value("level_type"),
+  level = gen_param_value("level", {"level"}, {"number"}),
+  star = gen_param_value("star", {"level"}, {"number"}),
+  prop = gen_param_value("prop", {"level"}, {"number"}),
+  prim = gen_simple_value("prim"),
 }
 
 local function discard_self(fn)
@@ -539,7 +555,7 @@ end
 
 -- fn(free_value) and table of functions eg free.metavariable(metavariable)
 values.free = setmetatable({}, {
-    __call = discard_self(gen_param_value("free", {"free_value"})) -- value should be constructed w/ free.something()
+    __call = discard_self(gen_param_value("free", {"free_value"}, {nil})) -- value should be constructed w/ free.something()
 })
 values.free.metavariable = function(mv)
   return values.free(free.metavariable(mv))
