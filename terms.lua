@@ -46,9 +46,12 @@ local function getmvinfo(id, mvs)
   return mvs[id] or getmvinfo(id, mvs.prev_mvs)
 end
 
-local metavariable_mt
+local function unify(self, other)
+  local self_mt = getmetatable(self)
+  return self_mt.__unify(self, other)
+end
 
-local unify
+local metavariable_mt
 
 metavariable_mt = {
   __index = {
@@ -319,37 +322,7 @@ local purity = {
     kind = "purity_pure",
   }
 }
---]]
 
---[/[
-local unifiable_simple_variant_mt = {
-  __index = {
-    unify = function(self, other)
-      if not other then
-        error("can't unify " .. self.kind .. " with nil")
-      elseif self ~= other then
-        error("can't unify " .. self.kind .. " with " .. other.kind)
-      end
-      return self
-    end,
-  }
-}
-
-local function unifiable_enum(data)
-  local name = data[1]
-  local res = {}
-  for i, v in ipairs(data.variants) do
-    res[v] = setmetatable({ kind = name .. '_' .. v }, unifiable_simple_variant_mt)
-  end
-  return res
-end
-
-local quantity = unifiable_enum {"quantity", variants = {"erased", "linear", "unrestricted"} }
-local visibility = unifiable_enum { "visibility", variants = { "explicit", "implicit" } }
-local purity = unifiable_enum {"purity", variants = {"effectful", "pure"}}
---]]
-
---[[
 -- WIP
 local terms = generate_records {
   quantity = enum_variants { "erased", "linear", "unrestricted", },
@@ -361,7 +334,32 @@ local terms = generate_records {
     pi = { TODO },
   },
 }
-]]
+--]]
+
+local unifiable_simple_variant_mt = {
+  __unify = function(self, other)
+    if not other then
+      error("can't unify " .. self.kind .. " with nil")
+    elseif self ~= other then
+      error("can't unify " .. self.kind .. " with " .. other.kind)
+    end
+    return self
+  end,
+}
+
+local function unifiable_enum(data)
+  local name = data[1]
+  local res = {}
+  for i, v in ipairs(data.variants) do
+    res[v] = { kind = name .. '_' .. v }
+    setmetatable(res[v], unifiable_simple_variant_mt)
+  end
+  return res
+end
+
+local quantity = unifiable_enum {"quantity", variants = {"erased", "linear", "unrestricted"} }
+local visibility = unifiable_enum { "visibility", variants = { "explicit", "implicit" } }
+local purity = unifiable_enum {"purity", variants = {"effectful", "pure"}}
 
 -- local function record(variants, path)
 --   if variants[0] then
@@ -399,63 +397,99 @@ local terms = generate_records {
 --     },
 -- }, "value")
 
-local unifiable_mt = {
-  __index = {
-    unify = function(self, other)
-      if self.kind ~= other.kind then
-        p(self.kind, other.kind)
-        error("can't unify values of different kinds where neither is a metavariable")
-      end
+local function extract_value_metavariable(value) -- -> Option<metavariable>
+  if value.kind == "value_free" and value.free_value.kind == "free_metavariable" then
+    return value.free_value.metavariable
+  end
+  return nil
+end
 
-      local unified = {}
-      local prefer_left = true
-      local prefer_right = true
-      for _, v in ipairs(self.params) do
-        local sv = self[v]
-        local ov = other[v]
-        if sv.kind then
-          local u = unify(sv, ov)
-          unified[v] = u
-          prefer_left = prefer_left and u == sv
-          prefer_right = prefer_right and u == ov
-        elseif sv ~= ov then
-          p("unify args", self, other)
-          error("unification failure as " .. v .. " field value doesn't match")
-        end
-      end
+local function gen_unify_fn(params)
+  return function(self, other) --> unified value
+    if self == other then
+      return self
+    end
 
-      if prefer_left then
-        return self
-      elseif prefer_right then
-        return other
-      else
-        unified.kind = self.kind
-        return unified
+    local self_mv = extract_value_metavariable(self)
+    local other_mv = extract_value_metavariable(other)
+
+    if self_mv and other_mv then
+      self_mv:bind_metavariable(other_mv)
+      return self_mv:get_canonical()
+    elseif self_mv then
+      return self_mv:bind_value(other)
+    elseif other_mv then
+      return other_mv:bind_value(self)
+    end
+
+    if self.kind ~= other.kind then
+      p(self.kind, other.kind)
+      error("can't unify values of different kinds where neither is a metavariable")
+    end
+
+    local unified = {}
+    local prefer_left = true
+    local prefer_right = true
+    for _, v in ipairs(params) do
+      local sv = self[v]
+      local ov = other[v]
+      if sv.kind then
+        local u = unify(sv, ov)
+        unified[v] = u
+        prefer_left = prefer_left and u == sv
+        prefer_right = prefer_right and u == ov
+      elseif sv ~= ov then
+        p("unify args", self, other)
+        error("unification failure as " .. v .. " field value doesn't match")
       end
     end
-  }
+
+    if prefer_left then
+      return self
+    elseif prefer_right then
+      return other
+    else
+      unified.kind = self.kind
+      return unified
+    end
+  end
+end
+
+local values_mts = {
+  quantity = {},
+  visibility = {},
+  arginfo = {},
+  resultinfo = {},
+  pi = {},
+  closure = {},
+  level_type = {},
+  level = {},
+  star = {},
+  prop = {},
+  prim = {},
+  free = {},
 }
 
 local function gen_simple_value(name)
+  values_mts[name].__unify = gen_unify_fn{}
   local val = {
     kind = "value_" .. name,
-    params = {},
   }
-  setmetatable(val, unifiable_mt)
+  setmetatable(val, values_mts[name])
   return val
 end
 
 local function gen_param_value(name, params)
+  values_mts[name].__unify = gen_unify_fn(params)
   return function(...)
     local args = { ... }
     local val = {
       kind = "value_" .. name,
-      params = params,
     }
     for i, v in ipairs(params) do
       val[v] = args[i]
     end
-    setmetatable(val, unifiable_mt)
+    setmetatable(val, values_mts[name])
     return val
   end
 end
@@ -477,11 +511,18 @@ local function gen_values(data)
 end
 
 local values = gen_values {
+  -- erased, linear, unrestricted / none, one, many
   quantity = {"quantity"},
+  -- explicit, implicit,
   visibility = {"visibility"},
+  -- info about the argument (is it implicit / what are the usage restrictions?)
   arginfo = {"quantity", "visibility"},
+  -- whether or not a function is effectful /
+  -- for a function returning a monad do i have to be called in an effectful context or am i pure
   resultinfo = {"purity"},
   pi = {"argtype", "arginfo", "resulttype", "resultinfo"},
+  -- closure is a type that contains a typed term corresponding to the body
+  -- and a runtime context representng the bound context where the closure was created
   closure = {}, -- TODO
   "level_type",
   level = {"level"},
@@ -490,46 +531,18 @@ local values = gen_values {
   "prim",
 }
 
+local function discard_self(fn)
+  return function(self, ...)
+    return fn(...)
+  end
+end
+
+-- fn(free_value) and table of functions eg free.metavariable(metavariable)
 values.free = setmetatable({}, {
-    __call = function(self, free_value) -- value should be constructed w/ free.something()
-      return {
-        kind = "value_free",
-        free_value = free_value,
-      }
-    end,
+    __call = discard_self(gen_param_value("free", {"free_value"})) -- value should be constructed w/ free.something()
 })
 values.free.metavariable = function(mv)
   return values.free(free.metavariable(mv))
-end
-
-local function extract_value_metavariable(value) -- -> Option<metavariable>
-  if value.kind == "value_free" and value.free_value.kind == "free_metavariable" then
-    return value.free_value.metavariable
-  end
-  return nil
-end
-
-unify = function(
-    first_value,
-    second_value)
-  -- -> unified value,
-  if first_value == second_value then
-    return first_value
-  end
-
-  local first_mv = extract_value_metavariable(first_value)
-  local second_mv = extract_value_metavariable(second_value)
-
-  if first_mv and second_mv then
-    first_mv:bind_metavariable(second_mv)
-    return first_mv:get_canonical()
-  elseif first_mv then
-    return unify(first_mv:bind_value(second_value), second_value)
-  elseif second_mv then
-    return unify(second_mv:bind_value(first_value), first_value)
-  end
-
-  return first_value:unify(second_value)
 end
 
 local function check(
