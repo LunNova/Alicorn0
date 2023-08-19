@@ -321,14 +321,14 @@ unify = function(
   local prefer_left = true
   local prefer_right = true
   for _, v in ipairs(first_value.params) do
-    local sv = first_value[v]
-    local ov = second_value[v]
-    if sv.kind then
-      local u = unify(sv, ov)
+    local fv = first_value[v]
+    local sv = second_value[v]
+    if fv.kind then
+      local u = unify(fv, sv)
       unified[v] = u
-      prefer_left = prefer_left and u == sv
-      prefer_right = prefer_right and u == ov
-    elseif sv ~= ov then
+      prefer_left = prefer_left and u == fv
+      prefer_right = prefer_right and u == sv
+    elseif fv ~= sv then
       p("unify args", first_value, second_value)
       error("unification failure as " .. v .. " field value doesn't match")
     end
