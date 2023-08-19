@@ -430,18 +430,15 @@ local types_mts = {
 }
 
 local types = {
-  -- erased, linear, unrestricted / none, one, many
   quantity = gen_enum("quantity", types_mts.quantity, {
     {"erased"},
     {"linear"},
     {"unrestricted"},
   }),
-  -- explicit, implicit,
   visibility = gen_enum("visibility", types_mts.visibility, {
     {"explicit"},
     {"implicit"},
   }),
-  -- info about the argument (is it implicit / what are the usage restrictions?)
   arginfo = gen_record("arginfo", types_mts.arginfo, {
     params =       {"quantity",         "visibility"},
     params_types = {types_mts.quantity, types_mts.visibility},
@@ -450,13 +447,16 @@ local types = {
     {"effectful"},
     {"pure"},
   }),
-  -- whether or not a function is effectful /
-  -- for a function returning a monad do i have to be called in an effectful context or am i pure
   resultinfo = gen_record("resultinfo", types_mts.resultinfo, { params = {"purity"}, params_types = {types_mts.purity} }),
   value = gen_enum("value", types_mts.value, {
+    -- erased, linear, unrestricted / none, one, many
     {"quantity", params = {"quantity"}, params_types = {types_mts.quantity} },
+    -- explicit, implicit,
     {"visibility", params = {"visibility"}, params_types = {types_mts.visibility} },
+    -- info about the argument (is it implicit / what are the usage restrictions?)
     {"arginfo", params = {"arginfo"}, params_types = {types_mts.arginfo} },
+    -- whether or not a function is effectful /
+    -- for a function returning a monad do i have to be called in an effectful context or am i pure
     {"resultinfo", params = {"resultinfo"}, params_types = {types_mts.resultinfo} },
     {"pi",
       params =       {"argtype",       "arginfo",         "resulttype",    "resultinfo"},
