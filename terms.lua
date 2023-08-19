@@ -46,8 +46,17 @@ local function getmvinfo(id, mvs)
   return mvs[id] or getmvinfo(id, mvs.prev_mvs)
 end
 
+--local types_mts
 local function unify(self, other)
+  --p("unifying", self, other)
   local self_mt = getmetatable(self)
+  --[[
+  for k, v in pairs(types_mts) do
+    if self_mt == v then
+      p("using mt from " .. k)
+    end
+  end
+  --]]
   return self_mt.__unify(self, other)
 end
 
@@ -296,62 +305,58 @@ local function extract_value_metavariable(value) -- -> Option<metavariable>
   return nil
 end
 
-local function gen_unify_fn(params)
-  return function(self, other) --> unified value
-    if self == other then
-      return self
-    end
+local function unify_fn(self, other) --> unified value
+  if self == other then
+    return self
+  end
 
-    local self_mv = extract_value_metavariable(self)
-    local other_mv = extract_value_metavariable(other)
+  local self_mv = extract_value_metavariable(self)
+  local other_mv = extract_value_metavariable(other)
 
-    if self_mv and other_mv then
-      self_mv:bind_metavariable(other_mv)
-      return self_mv:get_canonical()
-    elseif self_mv then
-      return self_mv:bind_value(other)
-    elseif other_mv then
-      return other_mv:bind_value(self)
-    end
+  if self_mv and other_mv then
+    self_mv:bind_metavariable(other_mv)
+    return self_mv:get_canonical()
+  elseif self_mv then
+    return self_mv:bind_value(other)
+  elseif other_mv then
+    return other_mv:bind_value(self)
+  end
 
-    if self.kind ~= other.kind then
-      p(self.kind, other.kind)
-      error("can't unify values of different kinds where neither is a metavariable")
-    end
+  if self.kind ~= other.kind then
+    p(self.kind, other.kind)
+    error("can't unify values of different kinds where neither is a metavariable")
+  end
 
-    local unified = {}
-    local prefer_left = true
-    local prefer_right = true
-    for _, v in ipairs(params) do
-      local sv = self[v]
-      local ov = other[v]
-      if sv.kind then
-        local u = unify(sv, ov)
-        unified[v] = u
-        prefer_left = prefer_left and u == sv
-        prefer_right = prefer_right and u == ov
-      elseif sv ~= ov then
-        p("unify args", self, other)
-        error("unification failure as " .. v .. " field value doesn't match")
-      end
+  local unified = {}
+  local prefer_left = true
+  local prefer_right = true
+  for _, v in ipairs(self.params) do
+    local sv = self[v]
+    local ov = other[v]
+    if sv.kind then
+      local u = unify(sv, ov)
+      unified[v] = u
+      prefer_left = prefer_left and u == sv
+      prefer_right = prefer_right and u == ov
+    elseif sv ~= ov then
+      p("unify args", self, other)
+      error("unification failure as " .. v .. " field value doesn't match")
     end
+  end
 
-    if prefer_left then
-      return self
-    elseif prefer_right then
-      return other
-    else
-      unified.kind = self.kind
-      return unified
-    end
+  if prefer_left then
+    return self
+  elseif prefer_right then
+    return other
+  else
+    unified.kind = self.kind
+    return unified
   end
 end
 
 local function check_arg_against_param(param, arg)
   local param_t = type(param)
-  if param_t == "nil" then
-    -- no checking
-  elseif param_t == "string" then
+  if param_t == "string" then
     local arg_t = type(arg)
     if arg_t ~= param then
       p("p", arg)
@@ -369,12 +374,15 @@ local function check_arg_against_param(param, arg)
   end
 end
 
-local function gen_param_value(kind, mt, params, params_types)
-  mt.__unify = gen_unify_fn(params)
+local function gen_record(kind, mt, params_with_types)
+  local params = params_with_types.params
+  local params_types = params_with_types.params_types
+  mt.__unify = unify_fn
   return function(...)
     local args = { ... }
     local val = {
       kind = kind,
+      params = params,
     }
     for i, v in ipairs(params) do
       local argi = args[i]
@@ -388,72 +396,81 @@ local function gen_param_value(kind, mt, params, params_types)
   end
 end
 
-local function gen_simple_value(kind, mt)
-  mt.__unify = gen_unify_fn{}
+local function gen_unit(kind, mt)
+  mt.__unify = unify_fn
   local val = {
     kind = kind,
+    params = {},
   }
   setmetatable(val, mt)
   return val
 end
 
-local function gen_enum(name, mt, variants, variants_types)
+local function gen_enum(name, mt, variants)
   local res = {}
-  for i, v in ipairs(variants) do
-    local kind = name .. "_" .. v
-    local vt = variants_types[i]
-    if vt then
-      res[v] = gen_param_value(kind, mt, {"arg"}, {vt})
+  for _, v in ipairs(variants) do
+    local vname = v[1]
+    local kind = name .. "_" .. vname
+    if v.params then
+      res[vname] = gen_record(kind, mt, v)
     else
-      res[v] = gen_simple_value(kind, mt)
+      res[vname] = gen_unit(kind, mt)
     end
   end
   return res
 end
 
-local quantity_mt = {}
-local quantity = gen_enum("quantity", quantity_mt, {"erased", "linear", "unrestricted"}, {nil, nil, nil})
-local visibility_mt = {}
-local visibility = gen_enum("visibility", visibility_mt, {"explicit", "implicit"}, {nil, nil})
-local purity_mt = {}
-local purity = gen_enum("purity", purity_mt, {"effectful", "pure"}, {nil, nil})
-
-local values_mts = {
+local types_mts = {
   quantity = {},
   visibility = {},
   arginfo = {},
+  purity = {},
   resultinfo = {},
-  pi = {},
-  closure = {},
-  level_type = {},
-  level = {},
-  star = {},
-  prop = {},
-  prim = {},
-  free = {},
+  value = {},
 }
 
--- NOTE!!! if you misspell a metatable name, it'll be nil
--- and will pass constructor typechecking unconditionally
-local values = {
+local types = {
   -- erased, linear, unrestricted / none, one, many
-  quantity = gen_param_value("value_quantity", values_mts.quantity, {"quantity"}, {quantity_mt}),
+  quantity = gen_enum("quantity", types_mts.quantity, {
+    {"erased"},
+    {"linear"},
+    {"unrestricted"},
+  }),
   -- explicit, implicit,
-  visibility = gen_param_value("value_visibility", values_mts.visibility, {"visibility"}, {visibility_mt}),
+  visibility = gen_enum("visibility", types_mts.visibility, {
+    {"explicit"},
+    {"implicit"},
+  }),
   -- info about the argument (is it implicit / what are the usage restrictions?)
-  arginfo = gen_param_value("value_arginfo", values_mts.arginfo, {"quantity", "visibility"}, {values_mts.quantity, values_mts.visibility}),
+  arginfo = gen_record("arginfo", types_mts.arginfo, {
+    params =       {"quantity",         "visibility"},
+    params_types = {types_mts.quantity, types_mts.visibility},
+  }),
+  purity = gen_enum("purity", types_mts.purity, {
+    {"effectful"},
+    {"pure"},
+  }),
   -- whether or not a function is effectful /
   -- for a function returning a monad do i have to be called in an effectful context or am i pure
-  resultinfo = gen_param_value("value_resultinfo", values_mts.resultinfo, {"purity"}, {purity_mt}),
-  pi = gen_param_value("value_pi", values_mts.pi, {"argtype", "arginfo", "resulttype", "resultinfo"}, {nil, values_mts.arginfo, nil, values_mts.resultinfo}),
-  -- closure is a type that contains a typed term corresponding to the body
-  -- and a runtime context representng the bound context where the closure was created
-  closure = gen_param_value("value_closure", values_mts.closure, {}), -- TODO
-  level_type = gen_simple_value("value_level_type", values_mts.level_type),
-  level = gen_param_value("value_level", values_mts.level, {"level"}, {"number"}),
-  star = gen_param_value("value_star", values_mts.star, {"level"}, {"number"}),
-  prop = gen_param_value("value_prop", values_mts.prop, {"level"}, {"number"}),
-  prim = gen_simple_value("value_prim", values_mts.prim),
+  resultinfo = gen_record("resultinfo", types_mts.resultinfo, { params = {"purity"}, params_types = {types_mts.purity} }),
+  value = gen_enum("value", types_mts.value, {
+    {"quantity", params = {"quantity"}, params_types = {types_mts.quantity} },
+    {"visibility", params = {"visibility"}, params_types = {types_mts.visibility} },
+    {"arginfo", params = {"arginfo"}, params_types = {types_mts.arginfo} },
+    {"resultinfo", params = {"resultinfo"}, params_types = {types_mts.resultinfo} },
+    {"pi",
+      params =       {"argtype",       "arginfo",         "resulttype",    "resultinfo"},
+      params_types = {types_mts.value, types_mts.arginfo, types_mts.value, types_mts.resultinfo},
+    },
+    -- closure is a type that contains a typed term corresponding to the body
+    -- and a runtime context representng the bound context where the closure was created
+    {"closure", params = {}, params_types = {} }, -- TODO
+    {"level_type"},
+    {"level", params = {"level"}, params_types = {"number"} },
+    {"star", params = {"level"}, params_types = {"number"} },
+    {"prop", params = {"level"}, params_types = {"number"} },
+    {"prim"},
+  }),
 }
 
 local function discard_self(fn)
@@ -463,11 +480,11 @@ local function discard_self(fn)
 end
 
 -- fn(free_value) and table of functions eg free.metavariable(metavariable)
-values.free = setmetatable({}, {
-    __call = discard_self(gen_param_value("value_free", values_mts.free, {"free_value"}, {nil})) -- value should be constructed w/ free.something()
+types.value.free = setmetatable({}, {
+    __call = discard_self(gen_record("value_free", types_mts.value, { params = {"free_value"}, params_types = {"table"} })) -- value should be constructed w/ free.something()
 })
-values.free.metavariable = function(mv)
-  return values.free(free.metavariable(mv))
+types.value.free.metavariable = function(mv)
+  return types.value.free(free.metavariable(mv))
 end
 
 local function check(
@@ -494,25 +511,25 @@ local function infer(
     )
   -- -> type of term, a typed term,
   if inferrable_term.kind == "inferrable_level0" then
-    return values.level_type, typed.level0
+    return types.value.level_type, typed.level0
   elseif inferrable_term.kind == "inferrable_level_suc" then
     local arg_type, arg_term = infer(inferrable_term.previous_level, typechecking_context)
-    unify(arg_type, values.level_type)
-    return values.level_type, typed.level_suc(arg_term)
+    unify(arg_type, types.value.level_type)
+    return types.value.level_type, typed.level_suc(arg_term)
   elseif inferrable_term.kind == "inferrable_level_max" then
     local arg_type_a, arg_term_a = infer(inferrable_term.level_a, typechecking_context)
     local arg_type_b, arg_term_b = infer(inferrable_term.level_b, typechecking_context)
-    unify(arg_type_a, values.level_type)
-    unify(arg_type_b, values.level_type)
-    return values.level_type, typed.level_max(arg_term_a, arg_term_b)
+    unify(arg_type_a, types.value.level_type)
+    unify(arg_type_b, types.value.level_type)
+    return types.value.level_type, typed.level_max(arg_term_a, arg_term_b)
   elseif inferrable_term.kind == "inferrable_level_type" then
-    return values.star(0), typed.level_type
+    return types.value.star(0), typed.level_type
   elseif inferrable_term.kind == "inferrable_star" then
-    return values.star(1), typed.star(0)
+    return types.value.star(1), typed.star(0)
   elseif inferrable_term.kind == "inferrable_prop" then
-    return values.star(1), typed.prop(0)
+    return types.value.star(1), typed.prop(0)
   elseif inferrable_term.kind == "inferrable_prim" then
-    return values.star(1), typed.prim
+    return types.value.star(1), typed.prim
   end
 
   error("unknown kind in infer: " .. inferrable_term.kind)
@@ -525,7 +542,7 @@ local function evaluate(
   -- -> a value
 
   if typed_term.kind == "typed_level0" then
-    return values.level(0)
+    return types.value.level(0)
   elseif typed_term.kind == "typed_level_suc" then
     local previous_level = evaluate(typed_term.previous_level, runtime_context)
     if previous_level.kind ~= "value_level" then
@@ -535,22 +552,22 @@ local function evaluate(
     if previous_level.level > 10 then
       error("NYI: level too high for typed_level_suc" .. tostring(previous_level.level))
     end
-    return values.level(previous_level.level + 1)
+    return types.value.level(previous_level.level + 1)
   elseif typed_term.kind == "typed_level_max" then
     local level_a = evaluate(typed_term.level_a, runtime_context)
     local level_b = evaluate(typed_term.level_b, runtime_context)
     if level_a.kind ~= "value_level" or level_b.kind ~= "value_level" then
       error("wrong type for level_a or level_b")
     end
-    return values.level(math.max(level_a.level, level_b.level))
+    return types.value.level(math.max(level_a.level, level_b.level))
   elseif typed_term.kind == "typed_level_type" then
-    return values.level_type
+    return types.value.level_type
   elseif typed_term.kind == "typed_star" then
-    return values.star(typed_term.level)
+    return types.value.star(typed_term.level)
   elseif typed_term.kind == "typed_prop" then
-    return values.prop(typed_term.level)
+    return types.value.prop(typed_term.level)
   elseif typed_term.kind == "typed_prim" then
-    return values.prim
+    return types.value.prim
   end
 
   error("unknown kind in evaluate " .. typed_term.kind)
@@ -563,10 +580,7 @@ return {
   infer = infer, -- fn
   typed = typed, -- {}
   evaluate = evaluate, -- fn
-  values = values, -- {}
+  types = types, -- {}
   unify = unify, -- fn
   typechecker_state = typechecker_state, -- fn (constructor)
-  quantity = quantity,
-  visibility = visibility,
-  purity = purity,
 }
