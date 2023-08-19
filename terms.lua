@@ -350,6 +350,7 @@ local function unify_fn(self, other) --> unified value
     return other
   else
     unified.kind = self.kind
+    unified.params = self.params
     return unified
   end
 end
