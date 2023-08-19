@@ -386,9 +386,7 @@ local function gen_record(kind, mt, params_with_types)
     }
     for i, v in ipairs(params) do
       local argi = args[i]
-      if params_types then
-        check_arg_against_param(params_types[i], argi)
-      end
+      check_arg_against_param(params_types[i], argi)
       val[v] = argi
     end
     setmetatable(val, mt)
