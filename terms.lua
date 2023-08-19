@@ -46,20 +46,7 @@ local function getmvinfo(id, mvs)
   return mvs[id] or getmvinfo(id, mvs.prev_mvs)
 end
 
---local types_mts
-local function unify(self, other)
-  --p("unifying", self, other)
-  local self_mt = getmetatable(self)
-  --[[
-  for k, v in pairs(types_mts) do
-    if self_mt == v then
-      p("using mt from " .. k)
-    end
-  end
-  --]]
-  return self_mt.__unify(self, other)
-end
-
+local unify
 local metavariable_mt
 
 metavariable_mt = {
@@ -305,52 +292,55 @@ local function extract_value_metavariable(value) -- -> Option<metavariable>
   return nil
 end
 
-local function unify_fn(self, other) --> unified value
-  if self == other then
-    return self
+unify = function(
+    first_value,
+    second_value)
+  -- -> unified value,
+  if first_value == second_value then
+    return first_value
   end
 
-  local self_mv = extract_value_metavariable(self)
-  local other_mv = extract_value_metavariable(other)
+  local first_mv = extract_value_metavariable(first_value)
+  local second_mv = extract_value_metavariable(second_value)
 
-  if self_mv and other_mv then
-    self_mv:bind_metavariable(other_mv)
-    return self_mv:get_canonical()
-  elseif self_mv then
-    return self_mv:bind_value(other)
-  elseif other_mv then
-    return other_mv:bind_value(self)
+  if first_mv and second_mv then
+    first_mv:bind_metavariable(second_mv)
+    return first_mv:get_canonical()
+  elseif first_mv then
+    return first_mv:bind_value(second_value)
+  elseif second_mv then
+    return second_mv:bind_value(first_value)
   end
 
-  if self.kind ~= other.kind then
-    p(self.kind, other.kind)
+  if first_value.kind ~= second_value.kind then
+    p(first_value.kind, second_value.kind)
     error("can't unify values of different kinds where neither is a metavariable")
   end
 
   local unified = {}
   local prefer_left = true
   local prefer_right = true
-  for _, v in ipairs(self.params) do
-    local sv = self[v]
-    local ov = other[v]
+  for _, v in ipairs(first_value.params) do
+    local sv = first_value[v]
+    local ov = second_value[v]
     if sv.kind then
       local u = unify(sv, ov)
       unified[v] = u
       prefer_left = prefer_left and u == sv
       prefer_right = prefer_right and u == ov
     elseif sv ~= ov then
-      p("unify args", self, other)
+      p("unify args", first_value, second_value)
       error("unification failure as " .. v .. " field value doesn't match")
     end
   end
 
   if prefer_left then
-    return self
+    return first_value
   elseif prefer_right then
-    return other
+    return second_value
   else
-    unified.kind = self.kind
-    unified.params = self.params
+    unified.kind = first_value.kind
+    unified.params = first_value.params
     return unified
   end
 end
@@ -378,7 +368,6 @@ end
 local function gen_record(kind, mt, params_with_types)
   local params = params_with_types.params
   local params_types = params_with_types.params_types
-  mt.__unify = unify_fn
   return function(...)
     local args = { ... }
     local val = {
@@ -396,7 +385,6 @@ local function gen_record(kind, mt, params_with_types)
 end
 
 local function gen_unit(kind, mt)
-  mt.__unify = unify_fn
   local val = {
     kind = kind,
     params = {},
