@@ -78,8 +78,8 @@ local function define_enum(self, name, variants)
   for _, v in ipairs(variants) do
     local vname = v[1]
     local kind = name .. "_" .. vname
-    if v.params then
-      self[vname] = gen_record(self, kind, v.params)
+    if v[2] then
+      self[vname] = gen_record(self, kind, v[2])
     else
       self[vname] = gen_unit(self, kind)
     end

@@ -185,22 +185,22 @@ local checkable = gen.declare_type()
 local inferrable = gen.declare_type()
 -- checkable terms need a target type to typecheck against
 checkable:define_enum("checkable", {
-  {"inferred", params = {"inferred_term", inferrable}},
-  {"lambda", params = {"body", checkable}},
+  {"inferred", {"inferred_term", inferrable}},
+  {"lambda", {"body", checkable}},
 })
 -- inferrable terms can have their type inferred / don't need a target type
 inferrable:define_enum("inferrable", {
   {"level_type"},
   {"level0"},
-  {"level_suc", params = {"previous_level", inferrable}},
-  {"level_max", params = {
+  {"level_suc", {"previous_level", inferrable}},
+  {"level_max", {
     "level_a", inferrable,
     "level_b", inferrable,
   }},
   {"star"},
   {"prop"},
   {"prim"},
-  {"annotated", params = {
+  {"annotated", {
     "annotated_term", checkable,
     "annotated_type", inferrable,
   }},
@@ -208,21 +208,21 @@ inferrable:define_enum("inferrable", {
 -- typed terms have been typechecked but do not store their type internally
 local typed = gen.declare_type()
 typed:define_enum("typed", {
-  {"lambda", params = {"body", typed}},
+  {"lambda", {"body", typed}},
   {"level_type"},
   {"level0"},
-  {"level_suc", params = {"previous_level", typed}},
-  {"level_max", params = {
+  {"level_suc", {"previous_level", typed}},
+  {"level_max", {
     "level_a", typed,
     "level_b", typed,
   }},
-  {"star", params = {"level", builtin_number}},
-  {"prop", params = {"level", builtin_number}},
+  {"star", {"level", builtin_number}},
+  {"prop", {"level", builtin_number}},
   {"prim"},
 })
 
 local free = gen.declare_enum("free", {
-  {"metavariable", params = {"metavariable", metavariable_mt}},
+  {"metavariable", {"metavariable", metavariable_mt}},
   -- TODO: quoting and axiom
 })
 
@@ -247,15 +247,15 @@ local resultinfo = gen.declare_record("resultinfo", {"purity", purity})
 local value = gen.declare_type()
 value:define_enum("value", {
   -- erased, linear, unrestricted / none, one, many
-  {"quantity", params = {"quantity", quantity}},
+  {"quantity", {"quantity", quantity}},
   -- explicit, implicit,
-  {"visibility", params = {"visibility", visibility}},
+  {"visibility", {"visibility", visibility}},
   -- info about the argument (is it implicit / what are the usage restrictions?)
-  {"arginfo", params = {"arginfo", arginfo}},
+  {"arginfo", {"arginfo", arginfo}},
   -- whether or not a function is effectful /
   -- for a function returning a monad do i have to be called in an effectful context or am i pure
-  {"resultinfo", params = {"resultinfo", resultinfo}},
-  {"pi", params = {
+  {"resultinfo", {"resultinfo", resultinfo}},
+  {"pi", {
     "argtype", value,
     "arginfo", arginfo,
     "resulttype", value,
@@ -263,11 +263,11 @@ value:define_enum("value", {
   }},
   -- closure is a type that contains a typed term corresponding to the body
   -- and a runtime context representng the bound context where the closure was created
-  {"closure", params = {}}, -- TODO
+  {"closure", {}}, -- TODO
   {"level_type"},
-  {"level", params = {"level", builtin_number}},
-  {"star", params = {"level", builtin_number}},
-  {"prop", params = {"level", builtin_number}},
+  {"level", {"level", builtin_number}},
+  {"star", {"level", builtin_number}},
+  {"prop", {"level", builtin_number}},
   {"prim"},
 })
 
