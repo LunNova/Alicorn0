@@ -180,52 +180,49 @@ end
 local builtin_number = gen.declare_foreign(function(val)
   return type(val) == "number"
 end)
-local builtin_table = gen.declare_foreign(function(val)
-  return type(val) == "table"
-end)
 
 local checkable = gen.declare_type()
 local inferrable = gen.declare_type()
 -- checkable terms need a target type to typecheck against
 checkable:define_enum("checkable", {
-  {"inferred", params = {"inferred_term"}, params_types = {inferrable}},
-  {"lambda", params = {"body"}, params_types = {checkable}},
+  {"inferred", params = {"inferred_term", inferrable}},
+  {"lambda", params = {"body", checkable}},
 })
 -- inferrable terms can have their type inferred / don't need a target type
 inferrable:define_enum("inferrable", {
   {"level_type"},
   {"level0"},
-  {"level_suc", params = {"previous_level"}, params_types = {inferrable}},
-  {"level_max",
-    params =       {"level_a",  "level_b"},
-    params_types = {inferrable, inferrable},
-  },
+  {"level_suc", params = {"previous_level", inferrable}},
+  {"level_max", params = {
+    "level_a", inferrable,
+    "level_b", inferrable,
+  }},
   {"star"},
   {"prop"},
   {"prim"},
-  {"annotated",
-    params =       {"annotated_term", "annotated_type"},
-    params_types = {checkable,        inferrable},
-  },
+  {"annotated", params = {
+    "annotated_term", checkable,
+    "annotated_type", inferrable,
+  }},
 })
 -- typed terms have been typechecked but do not store their type internally
 local typed = gen.declare_type()
 typed:define_enum("typed", {
-  {"lambda", params = {"body"}, params_types = {typed}},
+  {"lambda", params = {"body", typed}},
   {"level_type"},
   {"level0"},
-  {"level_suc", params = {"previous_level"}, params_types = {typed}},
-  {"level_max",
-    params =       {"level_a", "level_b"},
-    params_types = {typed,     typed},
-  },
-  {"star", params = {"level"}, params_types = {builtin_number}},
-  {"prop", params = {"level"}, params_types = {builtin_number}},
+  {"level_suc", params = {"previous_level", typed}},
+  {"level_max", params = {
+    "level_a", typed,
+    "level_b", typed,
+  }},
+  {"star", params = {"level", builtin_number}},
+  {"prop", params = {"level", builtin_number}},
   {"prim"},
 })
 
 local free = gen.declare_enum("free", {
-  {"metavariable", params = {"metavariable"}, params_types = {metavariable_mt}},
+  {"metavariable", params = {"metavariable", metavariable_mt}},
   -- TODO: quoting and axiom
 })
 
@@ -239,36 +236,38 @@ local visibility = gen.declare_enum("visibility", {
   {"implicit"},
 })
 local arginfo = gen.declare_record("arginfo", {
-  params =       {"quantity", "visibility"},
-  params_types = {quantity,   visibility},
+  "quantity", quantity,
+  "visibility", visibility,
 })
 local purity = gen.declare_enum("purity", {
   {"effectful"},
   {"pure"},
 })
-local resultinfo = gen.declare_record("resultinfo", { params = {"purity"}, params_types = {purity}})
+local resultinfo = gen.declare_record("resultinfo", {"purity", purity})
 local value = gen.declare_type()
 value:define_enum("value", {
   -- erased, linear, unrestricted / none, one, many
-  {"quantity", params = {"quantity"}, params_types = {quantity}},
+  {"quantity", params = {"quantity", quantity}},
   -- explicit, implicit,
-  {"visibility", params = {"visibility"}, params_types = {visibility}},
+  {"visibility", params = {"visibility", visibility}},
   -- info about the argument (is it implicit / what are the usage restrictions?)
-  {"arginfo", params = {"arginfo"}, params_types = {arginfo}},
+  {"arginfo", params = {"arginfo", arginfo}},
   -- whether or not a function is effectful /
   -- for a function returning a monad do i have to be called in an effectful context or am i pure
-  {"resultinfo", params = {"resultinfo"}, params_types = {resultinfo}},
-  {"pi",
-    params =       {"argtype", "arginfo", "resulttype", "resultinfo"},
-    params_types = {value,     arginfo,   value,        resultinfo},
-  },
+  {"resultinfo", params = {"resultinfo", resultinfo}},
+  {"pi", params = {
+    "argtype", value,
+    "arginfo", arginfo,
+    "resulttype", value,
+    "resultinfo", resultinfo
+  }},
   -- closure is a type that contains a typed term corresponding to the body
   -- and a runtime context representng the bound context where the closure was created
-  {"closure", params = {}, params_types = {}}, -- TODO
+  {"closure", params = {}}, -- TODO
   {"level_type"},
-  {"level", params = {"level"}, params_types = {builtin_number}},
-  {"star", params = {"level"}, params_types = {builtin_number}},
-  {"prop", params = {"level"}, params_types = {builtin_number}},
+  {"level", params = {"level", builtin_number}},
+  {"star", params = {"level", builtin_number}},
+  {"prop", params = {"level", builtin_number}},
   {"prim"},
 })
 
@@ -280,7 +279,7 @@ end
 
 -- fn(free_value) and table of functions eg free.metavariable(metavariable)
 value.free = setmetatable({}, {
-    __call = discard_self(gen.gen_record(value, "value_free", { params = {"free_value"}, params_types = {builtin_table}})) -- value should be constructed w/ free.something()
+    __call = discard_self(gen.gen_record(value, "value_free", {"free_value", free})) -- value should be constructed w/ free.something()
 })
 value.free.metavariable = function(mv)
   return value.free(free.metavariable(mv))

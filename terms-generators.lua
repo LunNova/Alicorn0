@@ -17,8 +17,17 @@ local function metatable_equality(mt)
 end
 
 local function gen_record(self, kind, params_with_types)
-  local params = params_with_types.params
-  local params_types = params_with_types.params_types
+  -- params are odd entries of params_with_types
+  -- params_types are even
+  local params = {}
+  local params_types = {}
+  for i, v in ipairs(params_with_types) do
+    if i % 2 == 1 then
+      params[math.floor(i / 2 + 1)] = v
+    else
+      params_types[math.floor(i / 2)] = v
+    end
+  end
   -- ensure there are at least as many param types as there are params
   for i, v in ipairs(params) do
     local param_type = params_types[i]
@@ -70,7 +79,7 @@ local function define_enum(self, name, variants)
     local vname = v[1]
     local kind = name .. "_" .. vname
     if v.params then
-      self[vname] = gen_record(self, kind, v)
+      self[vname] = gen_record(self, kind, v.params)
     else
       self[vname] = gen_unit(self, kind)
     end
