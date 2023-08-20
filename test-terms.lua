@@ -79,8 +79,9 @@ end
 function test_unify_2()
   local level_type = terms.value.level_type
   local prim = terms.value.prim
-  --local unified_1 = terms.unify(level_type, prim)
-  -- TODO: how to test that a lua error correctly happens?
+  local status, err = pcall(function() terms.unify(level_type, prim) end)
+  assert(status == false)
+  p(err)
 
   local tcs = terms.typechecker_state()
   local mv_a = tcs:metavariable()
