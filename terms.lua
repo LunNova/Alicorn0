@@ -177,22 +177,22 @@ local function speculate(f, ...)
   end
 end
 
-local builtin_number = gen.declare_foreign({}, function(val)
+local builtin_number = gen.declare_foreign(function(val)
   return type(val) == "number"
 end)
-local builtin_table = gen.declare_foreign({}, function(val)
+local builtin_table = gen.declare_foreign(function(val)
   return type(val) == "table"
 end)
 
-local checkable = gen.declare_type{}
-local inferrable = gen.declare_type{}
+local checkable = gen.declare_type()
+local inferrable = gen.declare_type()
 -- checkable terms need a target type to typecheck against
-checkable:declare_enum("checkable", {
+checkable:define_enum("checkable", {
   {"inferred", params = {"inferred_term"}, params_types = {inferrable}},
   {"lambda", params = {"body"}, params_types = {checkable}},
 })
 -- inferrable terms can have their type inferred / don't need a target type
-inferrable:declare_enum("inferrable", {
+inferrable:define_enum("inferrable", {
   {"level_type"},
   {"level0"},
   {"level_suc", params = {"previous_level"}, params_types = {inferrable}},
@@ -209,8 +209,8 @@ inferrable:declare_enum("inferrable", {
   },
 })
 -- typed terms have been typechecked but do not store their type internally
-local typed = gen.declare_type{}
-typed:declare_enum("typed", {
+local typed = gen.declare_type()
+typed:define_enum("typed", {
   {"lambda", params = {"body"}, params_types = {typed}},
   {"level_type"},
   {"level0"},
@@ -224,31 +224,31 @@ typed:declare_enum("typed", {
   {"prim"},
 })
 
-local free = gen.declare_enum({}, "free", {
+local free = gen.declare_enum("free", {
   {"metavariable", params = {"metavariable"}, params_types = {metavariable_mt}},
   -- TODO: quoting and axiom
 })
 
-local quantity = gen.declare_enum({}, "quantity", {
+local quantity = gen.declare_enum("quantity", {
   {"erased"},
   {"linear"},
   {"unrestricted"},
 })
-local visibility = gen.declare_enum({}, "visibility", {
+local visibility = gen.declare_enum("visibility", {
   {"explicit"},
   {"implicit"},
 })
-local arginfo = gen.declare_record({}, "arginfo", {
+local arginfo = gen.declare_record("arginfo", {
   params =       {"quantity", "visibility"},
   params_types = {quantity,   visibility},
 })
-local purity = gen.declare_enum({}, "purity", {
+local purity = gen.declare_enum("purity", {
   {"effectful"},
   {"pure"},
 })
-local resultinfo = gen.declare_record({}, "resultinfo", { params = {"purity"}, params_types = {purity}})
-local value = gen.declare_type{}
-value:declare_enum("value", {
+local resultinfo = gen.declare_record("resultinfo", { params = {"purity"}, params_types = {purity}})
+local value = gen.declare_type()
+value:define_enum("value", {
   -- erased, linear, unrestricted / none, one, many
   {"quantity", params = {"quantity"}, params_types = {quantity}},
   -- explicit, implicit,

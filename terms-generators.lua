@@ -4,6 +4,12 @@ local function discard_self(fn)
   end
 end
 
+local function new_self(fn)
+  return function(...)
+    return fn({}, ...)
+  end
+end
+
 local function metatable_equality(mt)
   return function(val)
     return getmetatable(val) == mt
@@ -82,9 +88,9 @@ end
 
 local type_mt = {
   __index = {
-    declare_record = declare_record,
-    declare_enum = declare_enum,
-    declare_foreign = declare_foreign,
+    define_record = declare_record,
+    define_enum = declare_enum,
+    define_foreign = declare_foreign,
   }
 }
 
@@ -94,10 +100,10 @@ local function declare_type(self)
 end
 
 return {
-  declare_record = declare_record,
-  declare_enum = declare_enum,
-  declare_foreign = declare_foreign,
-  declare_type = declare_type,
+  declare_record = new_self(declare_record),
+  declare_enum = new_self(declare_enum),
+  declare_foreign = new_self(declare_foreign),
+  declare_type = new_self(declare_type),
   gen_record = gen_record,
   metatable_equality = metatable_equality,
 }
