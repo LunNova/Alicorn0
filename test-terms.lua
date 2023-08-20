@@ -85,16 +85,20 @@ function test_unify_2()
   local tcs = terms.typechecker_state()
   local mv_a = tcs:metavariable()
   local mv_b = tcs:metavariable()
-  local resultinfo = function(x) return terms.value.resultinfo(terms.resultinfo(x)) end
   local freemeta = terms.value.free.metavariable
-  local resinfo_a = resultinfo(freemeta(mv_a))
-  local resinfo_b = resultinfo(freemeta(mv_b))
-  local resinfo_effectful = resultinfo(terms.purity.effectful)
-  local resinfo_pure = resultinfo(terms.purity.pure)
-  local unified_2 = terms.unify(resinfo_a, resinfo_effectful)
-  p(unified_2, mv_a)
-  assert(unified_2 == resinfo_effectful)
-  --local unified_3 = terms.unify(resinfo_a, resinfo_pure)
+  local free_a = freemeta(mv_a)
+  local free_b = freemeta(mv_b)
+
+  local level0 = terms.value.level(0)
+  local arginfo = terms.arginfo(terms.quantity.unrestricted, terms.visibility.explicit)
+  local resinfo = terms.resultinfo(terms.purity.pure)
+
+  local pi_a = terms.value.pi(free_a, arginfo, level0, resinfo)
+  local pi_b = terms.value.pi(level0, arginfo, free_b, resinfo)
+  local unified_2 = terms.unify(pi_a, pi_b)
+  p(unified_2)
+  assert(unified_2.argtype == unified_2.resulttype)
+  assert(unified_2.argtype == level0)
 end
 
 

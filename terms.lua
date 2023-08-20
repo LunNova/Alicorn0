@@ -313,8 +313,7 @@ unify = function(
   end
 
   if first_value.kind ~= second_value.kind then
-    p(first_value.kind, second_value.kind)
-    error("can't unify values of different kinds where neither is a metavariable")
+    error("can't unify values of kinds " .. first_value.kind .. " and " .. second_value.kind)
   end
 
   local unified = {}
