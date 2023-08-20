@@ -345,30 +345,38 @@ unify = function(
   end
 end
 
+local function discard_self(fn)
+  return function(self, ...)
+    return fn(...)
+  end
+end
+
 local function check_arg_against_param(param, arg)
-  local param_t = type(param)
-  if param_t == "string" then
-    local arg_t = type(arg)
-    if arg_t ~= param then
+  if param.value_check then
+    if not param.value_check(arg) then
       p("p", arg)
       error("wrong argument type passed to value constructor")
     end
-  elseif param_t == "table" then
+  else
     local arg_mt = getmetatable(arg)
     if arg_mt ~= param and extract_value_metavariable(arg) == nil then
       p("mt", arg)
       error("wrong argument type passed to value constructor")
     end
-  else
-    p(param)
-    error("invalid parameter type found while checking argument types in value constructor")
   end
 end
 
-local function gen_record(kind, mt, params_with_types)
+local function gen_record(self, kind, params_with_types)
   local params = params_with_types.params
   local params_types = params_with_types.params_types
-  return function(...)
+  -- ensure there are at least as many param types as there are params
+  for i, _ in ipairs(params) do
+    local v = params_types[i]
+    if not v then
+      error("nil passed to parameter type " .. tostring(i) .. " of " .. kind .. " (probable typo?)")
+    end
+  end
+  local function record_cons(...)
     local args = { ... }
     local val = {
       kind = kind,
@@ -379,99 +387,118 @@ local function gen_record(kind, mt, params_with_types)
       check_arg_against_param(params_types[i], argi)
       val[v] = argi
     end
-    setmetatable(val, mt)
+    setmetatable(val, self)
     return val
   end
+  return record_cons
 end
 
-local function gen_unit(kind, mt)
+local function declare_record(self, kind, params_with_types)
+  local record_cons = gen_record(self, kind, params_with_types)
+  setmetatable(self, {
+    __call = discard_self(record_cons),
+  })
+  return self
+end
+
+local function gen_unit(self, kind)
   local val = {
     kind = kind,
     params = {},
   }
-  setmetatable(val, mt)
+  setmetatable(val, self)
   return val
 end
 
-local function gen_enum(name, mt, variants)
-  local res = {}
+local function declare_enum(self, name, variants)
   for _, v in ipairs(variants) do
     local vname = v[1]
     local kind = name .. "_" .. vname
     if v.params then
-      res[vname] = gen_record(kind, mt, v)
+      self[vname] = gen_record(self, kind, v)
     else
-      res[vname] = gen_unit(kind, mt)
+      self[vname] = gen_unit(self, kind)
     end
   end
-  return res
+  setmetatable(self, nil)
+  return self
 end
 
-local types_mts = {
-  quantity = {},
-  visibility = {},
-  arginfo = {},
-  purity = {},
-  resultinfo = {},
-  value = {},
-}
-
-local types = {
-  quantity = gen_enum("quantity", types_mts.quantity, {
-    {"erased"},
-    {"linear"},
-    {"unrestricted"},
-  }),
-  visibility = gen_enum("visibility", types_mts.visibility, {
-    {"explicit"},
-    {"implicit"},
-  }),
-  arginfo = gen_record("arginfo", types_mts.arginfo, {
-    params =       {"quantity",         "visibility"},
-    params_types = {types_mts.quantity, types_mts.visibility},
-  }),
-  purity = gen_enum("purity", types_mts.purity, {
-    {"effectful"},
-    {"pure"},
-  }),
-  resultinfo = gen_record("resultinfo", types_mts.resultinfo, { params = {"purity"}, params_types = {types_mts.purity} }),
-  value = gen_enum("value", types_mts.value, {
-    -- erased, linear, unrestricted / none, one, many
-    {"quantity", params = {"quantity"}, params_types = {types_mts.quantity} },
-    -- explicit, implicit,
-    {"visibility", params = {"visibility"}, params_types = {types_mts.visibility} },
-    -- info about the argument (is it implicit / what are the usage restrictions?)
-    {"arginfo", params = {"arginfo"}, params_types = {types_mts.arginfo} },
-    -- whether or not a function is effectful /
-    -- for a function returning a monad do i have to be called in an effectful context or am i pure
-    {"resultinfo", params = {"resultinfo"}, params_types = {types_mts.resultinfo} },
-    {"pi",
-      params =       {"argtype",       "arginfo",         "resulttype",    "resultinfo"},
-      params_types = {types_mts.value, types_mts.arginfo, types_mts.value, types_mts.resultinfo},
-    },
-    -- closure is a type that contains a typed term corresponding to the body
-    -- and a runtime context representng the bound context where the closure was created
-    {"closure", params = {}, params_types = {} }, -- TODO
-    {"level_type"},
-    {"level", params = {"level"}, params_types = {"number"} },
-    {"star", params = {"level"}, params_types = {"number"} },
-    {"prop", params = {"level"}, params_types = {"number"} },
-    {"prim"},
-  }),
-}
-
-local function discard_self(fn)
-  return function(self, ...)
-    return fn(...)
-  end
+local function declare_foreign(self, value_check)
+  self.value_check = value_check
+  setmetatable(self, nil)
+  return self
 end
+
+local type_mt = {
+  __index = {
+    declare_record = declare_record,
+    declare_enum = declare_enum,
+    declare_foreign = declare_foreign,
+  }
+}
+
+local function declare_type(self)
+  setmetatable(self, type_mt)
+  return self
+end
+
+local builtin_number = declare_foreign({}, function(val)
+  return type(val) == "number"
+end)
+local builtin_table = declare_foreign({}, function(val)
+  return type(val) == "table"
+end)
+
+local quantity = declare_enum({}, "quantity", {
+  {"erased"},
+  {"linear"},
+  {"unrestricted"},
+})
+local visibility = declare_enum({}, "visibility", {
+  {"explicit"},
+  {"implicit"},
+})
+local arginfo = declare_record({}, "arginfo", {
+  params =       {"quantity", "visibility"},
+  params_types = {quantity,   visibility},
+})
+local purity = declare_enum({}, "purity", {
+  {"effectful"},
+  {"pure"},
+})
+local resultinfo = declare_record({}, "resultinfo", { params = {"purity"}, params_types = {purity} })
+local value = declare_type({})
+value:declare_enum("value", {
+  -- erased, linear, unrestricted / none, one, many
+  {"quantity", params = {"quantity"}, params_types = {quantity} },
+  -- explicit, implicit,
+  {"visibility", params = {"visibility"}, params_types = {visibility} },
+  -- info about the argument (is it implicit / what are the usage restrictions?)
+  {"arginfo", params = {"arginfo"}, params_types = {arginfo} },
+  -- whether or not a function is effectful /
+  -- for a function returning a monad do i have to be called in an effectful context or am i pure
+  {"resultinfo", params = {"resultinfo"}, params_types = {resultinfo} },
+  {"pi",
+    params =       {"argtype", "arginfo", "resulttype", "resultinfo"},
+    params_types = {value,     arginfo,   value,        resultinfo},
+  },
+  -- closure is a type that contains a typed term corresponding to the body
+  -- and a runtime context representng the bound context where the closure was created
+  {"closure", params = {}, params_types = {} }, -- TODO
+  {"level_type"},
+  {"level", params = {"level"}, params_types = {builtin_number} },
+  {"star", params = {"level"}, params_types = {builtin_number} },
+  {"prop", params = {"level"}, params_types = {builtin_number} },
+  {"prim"},
+})
 
 -- fn(free_value) and table of functions eg free.metavariable(metavariable)
-types.value.free = setmetatable({}, {
-    __call = discard_self(gen_record("value_free", types_mts.value, { params = {"free_value"}, params_types = {"table"} })) -- value should be constructed w/ free.something()
+value.free = setmetatable({}, {
+    __call = discard_self(gen_record(value, "value_free", { params = {"free_value"}, params_types = {builtin_table} })) -- value should be constructed w/ free.something()
 })
-types.value.free.metavariable = function(mv)
-  return types.value.free(free.metavariable(mv))
+value.free.metavariable = function(mv)
+  return value.free(free.metavariable(mv))
 end
 
 local function check(
@@ -498,25 +525,25 @@ local function infer(
     )
   -- -> type of term, a typed term,
   if inferrable_term.kind == "inferrable_level0" then
-    return types.value.level_type, typed.level0
+    return value.level_type, typed.level0
   elseif inferrable_term.kind == "inferrable_level_suc" then
     local arg_type, arg_term = infer(inferrable_term.previous_level, typechecking_context)
-    unify(arg_type, types.value.level_type)
-    return types.value.level_type, typed.level_suc(arg_term)
+    unify(arg_type, value.level_type)
+    return value.level_type, typed.level_suc(arg_term)
   elseif inferrable_term.kind == "inferrable_level_max" then
     local arg_type_a, arg_term_a = infer(inferrable_term.level_a, typechecking_context)
     local arg_type_b, arg_term_b = infer(inferrable_term.level_b, typechecking_context)
-    unify(arg_type_a, types.value.level_type)
-    unify(arg_type_b, types.value.level_type)
-    return types.value.level_type, typed.level_max(arg_term_a, arg_term_b)
+    unify(arg_type_a, value.level_type)
+    unify(arg_type_b, value.level_type)
+    return value.level_type, typed.level_max(arg_term_a, arg_term_b)
   elseif inferrable_term.kind == "inferrable_level_type" then
-    return types.value.star(0), typed.level_type
+    return value.star(0), typed.level_type
   elseif inferrable_term.kind == "inferrable_star" then
-    return types.value.star(1), typed.star(0)
+    return value.star(1), typed.star(0)
   elseif inferrable_term.kind == "inferrable_prop" then
-    return types.value.star(1), typed.prop(0)
+    return value.star(1), typed.prop(0)
   elseif inferrable_term.kind == "inferrable_prim" then
-    return types.value.star(1), typed.prim
+    return value.star(1), typed.prim
   end
 
   error("unknown kind in infer: " .. inferrable_term.kind)
@@ -529,7 +556,7 @@ local function evaluate(
   -- -> a value
 
   if typed_term.kind == "typed_level0" then
-    return types.value.level(0)
+    return value.level(0)
   elseif typed_term.kind == "typed_level_suc" then
     local previous_level = evaluate(typed_term.previous_level, runtime_context)
     if previous_level.kind ~= "value_level" then
@@ -539,22 +566,22 @@ local function evaluate(
     if previous_level.level > 10 then
       error("NYI: level too high for typed_level_suc" .. tostring(previous_level.level))
     end
-    return types.value.level(previous_level.level + 1)
+    return value.level(previous_level.level + 1)
   elseif typed_term.kind == "typed_level_max" then
     local level_a = evaluate(typed_term.level_a, runtime_context)
     local level_b = evaluate(typed_term.level_b, runtime_context)
     if level_a.kind ~= "value_level" or level_b.kind ~= "value_level" then
       error("wrong type for level_a or level_b")
     end
-    return types.value.level(math.max(level_a.level, level_b.level))
+    return value.level(math.max(level_a.level, level_b.level))
   elseif typed_term.kind == "typed_level_type" then
-    return types.value.level_type
+    return value.level_type
   elseif typed_term.kind == "typed_star" then
-    return types.value.star(typed_term.level)
+    return value.star(typed_term.level)
   elseif typed_term.kind == "typed_prop" then
-    return types.value.prop(typed_term.level)
+    return value.prop(typed_term.level)
   elseif typed_term.kind == "typed_prim" then
-    return types.value.prim
+    return value.prim
   end
 
   error("unknown kind in evaluate " .. typed_term.kind)
@@ -570,4 +597,11 @@ return {
   types = types, -- {}
   unify = unify, -- fn
   typechecker_state = typechecker_state, -- fn (constructor)
+
+  quantity = quantity,
+  visibility = visibility,
+  arginfo = arginfo,
+  purity = purity,
+  resultinfo = resultinfo,
+  value = value,
 }

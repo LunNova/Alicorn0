@@ -43,54 +43,54 @@ function test_unify()
   local tcs = terms.typechecker_state()
 
   local mv_a = tcs:metavariable()
-  local free_mv_a = terms.types.value.free.metavariable(mv_a)
+  local free_mv_a = terms.value.free.metavariable(mv_a)
   p(mv_a, free_mv_a)
 
-  local unified = terms.unify(free_mv_a, terms.types.value.level_type)
-  assert(unified == terms.types.value.level_type)
-  assert(mv_a:get_value() == terms.types.value.level_type)
+  local unified = terms.unify(free_mv_a, terms.value.level_type)
+  assert(unified == terms.value.level_type)
+  assert(mv_a:get_value() == terms.value.level_type)
 end
 
 function test_unify_more_metavariables()
   local tcs = terms.typechecker_state()
 
-  -- terms.types.value.free.metavariable(...)
-  -- terms.types.value.free.axiom(...)
+  -- terms.value.free.metavariable(...)
+  -- terms.value.free.axiom(...)
   -- VS
-  -- terms.types.value.free(terms.free.metavariable(...))
+  -- terms.value.free(terms.free.metavariable(...))
 
   local mv_a = tcs:metavariable()
   local mv_b = tcs:metavariable()
   p('mv_a', mv_a)
-  local free_mv_a = terms.types.value.free.metavariable(mv_a)
-  local free_mv_b = terms.types.value.free.metavariable(mv_b)
+  local free_mv_a = terms.value.free.metavariable(mv_a)
+  local free_mv_b = terms.value.free.metavariable(mv_b)
   p(mv_a, free_mv_a)
 
   terms.unify(free_mv_b, free_mv_a)
   assert(mv_b:get_canonical().id == mv_a.id)
 
-  local unified = terms.unify(free_mv_a, terms.types.value.level_type)
-  assert(unified == terms.types.value.level_type)
-  assert(mv_a:get_value() == terms.types.value.level_type)
+  local unified = terms.unify(free_mv_a, terms.value.level_type)
+  assert(unified == terms.value.level_type)
+  assert(mv_a:get_value() == terms.value.level_type)
 
-  assert(mv_b:get_value() == terms.types.value.level_type)
+  assert(mv_b:get_value() == terms.value.level_type)
 end
 
 function test_unify_2()
-  local level_type = terms.types.value.level_type
-  local prim = terms.types.value.prim
+  local level_type = terms.value.level_type
+  local prim = terms.value.prim
   --local unified_1 = terms.unify(level_type, prim)
   -- TODO: how to test that a lua error correctly happens?
 
   local tcs = terms.typechecker_state()
   local mv_a = tcs:metavariable()
   local mv_b = tcs:metavariable()
-  local resultinfo = function(x) return terms.types.value.resultinfo(terms.types.resultinfo(x)) end
-  local freemeta = terms.types.value.free.metavariable
+  local resultinfo = function(x) return terms.value.resultinfo(terms.resultinfo(x)) end
+  local freemeta = terms.value.free.metavariable
   local resinfo_a = resultinfo(freemeta(mv_a))
   local resinfo_b = resultinfo(freemeta(mv_b))
-  local resinfo_effectful = resultinfo(terms.types.purity.effectful)
-  local resinfo_pure = resultinfo(terms.types.purity.pure)
+  local resinfo_effectful = resultinfo(terms.purity.effectful)
+  local resinfo_pure = resultinfo(terms.purity.pure)
   local unified_2 = terms.unify(resinfo_a, resinfo_effectful)
   p(unified_2, mv_a)
   assert(unified_2 == resinfo_effectful)
