@@ -47,7 +47,7 @@ local function gen_record(self, kind, params_with_types)
   return record_cons
 end
 
-local function declare_record(self, kind, params_with_types)
+local function define_record(self, kind, params_with_types)
   local record_cons = gen_record(self, kind, params_with_types)
   setmetatable(self, {
     __call = discard_self(record_cons),
@@ -65,7 +65,7 @@ local function gen_unit(self, kind)
   return val
 end
 
-local function declare_enum(self, name, variants)
+local function define_enum(self, name, variants)
   for _, v in ipairs(variants) do
     local vname = v[1]
     local kind = name .. "_" .. vname
@@ -80,7 +80,7 @@ local function declare_enum(self, name, variants)
   return self
 end
 
-local function declare_foreign(self, value_check)
+local function define_foreign(self, value_check)
   self.value_check = value_check
   setmetatable(self, nil)
   return self
@@ -88,22 +88,22 @@ end
 
 local type_mt = {
   __index = {
-    define_record = declare_record,
-    define_enum = declare_enum,
-    define_foreign = declare_foreign,
+    define_record = define_record,
+    define_enum = define_enum,
+    define_foreign = define_foreign,
   }
 }
 
-local function declare_type(self)
+local function define_type(self)
   setmetatable(self, type_mt)
   return self
 end
 
 return {
-  declare_record = new_self(declare_record),
-  declare_enum = new_self(declare_enum),
-  declare_foreign = new_self(declare_foreign),
-  declare_type = new_self(declare_type),
+  declare_record = new_self(define_record),
+  declare_enum = new_self(define_enum),
+  declare_foreign = new_self(define_foreign),
+  declare_type = new_self(define_type),
   gen_record = gen_record,
   metatable_equality = metatable_equality,
 }
