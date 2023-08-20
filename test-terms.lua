@@ -96,10 +96,10 @@ function test_unify_2()
 
   local pi_a = terms.value.pi(free_a, arginfo, level0, resinfo)
   local pi_b = terms.value.pi(level0, arginfo, free_b, resinfo)
-  local unified_2 = terms.unify(pi_a, pi_b)
-  p(unified_2)
-  assert(unified_2.argtype == unified_2.resulttype)
-  assert(unified_2.argtype == level0)
+  local unified = terms.unify(pi_a, pi_b)
+  p(unified)
+  assert(unified.argtype == unified.resulttype)
+  assert(unified.argtype == level0)
 end
 
 
