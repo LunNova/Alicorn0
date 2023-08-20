@@ -4,18 +4,9 @@ local function discard_self(fn)
   end
 end
 
-local function check_arg_against_param(param_type, arg, kind, param)
-  if param_type.value_check then
-    if not param_type.value_check(arg) then
-      p("p", arg)
-      error("wrong argument type passed to constructor " .. kind .. ", parameter " .. param)
-    end
-  else
-    local arg_mt = getmetatable(arg)
-    if arg_mt ~= param_type then
-      p("mt", arg)
-      error("wrong argument type passed to constructor " .. kind .. ", parameter " .. param)
-    end
+local function metatable_equality(mt)
+  return function(val)
+    return getmetatable(val) == mt
   end
 end
 
@@ -37,7 +28,11 @@ local function gen_record(self, kind, params_with_types)
     }
     for i, v in ipairs(params) do
       local argi = args[i]
-      check_arg_against_param(params_types[i], argi, kind, v)
+      -- type-check constructor arguments
+      if not params_types[i].value_check(argi) then
+        p("p", argi)
+        error("wrong argument type passed to constructor " .. kind .. ", parameter " .. v)
+      end
       val[v] = argi
     end
     setmetatable(val, self)
@@ -51,6 +46,7 @@ local function declare_record(self, kind, params_with_types)
   setmetatable(self, {
     __call = discard_self(record_cons),
   })
+  self.value_check = metatable_equality(self)
   return self
 end
 
@@ -73,6 +69,7 @@ local function declare_enum(self, name, variants)
       self[vname] = gen_unit(self, kind)
     end
   end
+  self.value_check = metatable_equality(self)
   setmetatable(self, nil)
   return self
 end
@@ -102,4 +99,5 @@ return {
   declare_foreign = declare_foreign,
   declare_type = declare_type,
   gen_record = gen_record,
+  metatable_equality = metatable_equality,
 }

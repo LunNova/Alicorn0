@@ -115,7 +115,8 @@ metavariable_mt = {
         bound_mv_id = other.id,
       }
     end
-  }
+  },
+  value_check = gen.metatable_equality,
 }
 
 local typechecker_state_mt
