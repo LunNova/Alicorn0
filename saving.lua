@@ -158,10 +158,12 @@ local function deserialize_known(state, stype, id)
 	return deserializers[stype](state, id)
 end
 
+local already_derived = {}
+
 ---@type Deriver
 local serialize_deriver = {
 	record = function(t, info)
-		if t.derived_serialize then
+		if already_derived[t] then
 			return
 		end
 
@@ -191,10 +193,10 @@ local serialize_deriver = {
 			return t(table.unpack(deserialized))
 		end
 
-		t.derived_serialize = true
+		already_derived[t] = true
 	end,
 	enum = function(t, info)
-		if t.derived_serialize then
+		if already_derived[t] then
 			return
 		end
 
@@ -287,13 +289,13 @@ local serialize_deriver = {
 		-- 	return setmetatable(deserialized, t)
 		-- end
 
-		t.derived_serialize = true
+		already_derived[t] = true
 	end,
 	foreign = function()
 		error("can't derive :serialize() for a foreign type")
 	end,
 	map = function(t, info)
-		if t.derived_serialize then
+		if already_derived[t] then
 			return
 		end
 
@@ -326,10 +328,10 @@ local serialize_deriver = {
 			return deserialized
 		end
 
-		t.derived_serialize = true
+		already_derived[t] = true
 	end,
 	set = function(t, info)
-		if t.derived_serialize then
+		if already_derived[t] then
 			return
 		end
 
@@ -356,10 +358,10 @@ local serialize_deriver = {
 			return deserialized
 		end
 
-		t.derived_serialize = true
+		already_derived[t] = true
 	end,
 	array = function(t, info)
-		if t.derived_serialize then
+		if already_derived[t] then
 			return
 		end
 
@@ -386,7 +388,7 @@ local serialize_deriver = {
 			return deserialized
 		end
 
-		t.derived_serialize = true
+		already_derived[t] = true
 	end,
 }
 

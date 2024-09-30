@@ -110,7 +110,6 @@ end
 ---@field derived_pretty_print boolean?
 ---@field __tostring function(RecordValue): string
 ---@field derived_diff boolean?
----@field derived_serialize boolean?
 
 ---@class RecordValue: Value
 ---@field pretty_print fun(RecordValue, ...)
@@ -212,7 +211,6 @@ end
 ---@field derived_pretty_print boolean?
 ---@field __tostring function(EnumValue): string
 ---@field derived_diff boolean?
----@field derived_serialize boolean?
 
 ---@class EnumValue: Value
 ---@field pretty_print fun(EnumValue, ...)
@@ -320,7 +318,6 @@ end
 ---@field __pairs function(MapValue): function, MapValue, Value?
 ---@field derived_pretty_print boolean?
 ---@field __tostring function(MapValue): string
----@field derived_serialize boolean?
 
 ---@class MapValue: Value
 ---@field _map { [Value]: Value }
@@ -474,7 +471,6 @@ end
 ---@field __pairs function(SetValue): function, SetValue, Value?
 ---@field derived_pretty_print boolean?
 ---@field __tostring function(SetValue): string
----@field derived_serialize boolean?
 
 ---@class SetValue: Value
 ---@field _set { [Value]: boolean }
@@ -632,7 +628,6 @@ end
 ---@field derived_pretty_print boolean?
 ---@field __tostring function(ArrayValue): string
 ---@field derived_diff boolean?
----@field derived_serialize boolean?
 
 ---@class ArrayValue: Value
 ---@field n integer
