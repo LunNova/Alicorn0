@@ -14,6 +14,8 @@ local derivers = require "derivers"
 -- returns state
 -- deserialize(state) returns a term that's __eq to the original
 
+-- FIXME: not fully following above plan atm
+
 ---@class SerializedEnum
 ---@field kind string
 ---@field args integer[]
@@ -40,42 +42,28 @@ local deserializers = {}
 
 -- Serializers for Lua built-in types
 
+-- FIXME: jank
 serializers["__number"] = function(state, subject)
 	-- FIXME: this is a hack to allow serializing numbers when serialization IDs are also numbers
-	-- it's silly
 	local serialized = { kind = "__number", value = subject }
 	table.insert(state.construction, serialized)
 	return #state.construction
 end
 
-serializers["__string"] = function(state, subject)
-	return subject -- Strings can be serialized as-is
-end
-
-serializers["__boolean"] = function(state, subject)
-	return subject -- Booleans can be serialized as-is
-end
-
-serializers["__nil"] = function(state, subject)
-	return subject -- nil can be serialized as-is
-end
-
--- Deserializers for Lua built-in types
-
+-- FIXME: jank
 deserializers["__number"] = function(state, id)
 	return state.construction[id].value
 end
 
-deserializers["__string"] = function(state, id)
-	return id -- Strings can be deserialized as-is
+-- these built-in types don't need a deserializer impl because they are stored as-is
+serializers["__string"] = function(state, subject)
+	return subject
 end
-
-deserializers["__boolean"] = function(state, id)
-	return id -- Booleans can be deserialized as-is
+serializers["__boolean"] = function(state, subject)
+	return subject
 end
-
-deserializers["__nil"] = function(state, id)
-	return id -- nil can be deserialized as-is
+serializers["__nil"] = function(state, subject)
+	return subject
 end
 
 ---serialize a value of unknown type
@@ -127,33 +115,6 @@ local function deserialize(state, id)
 	local stype = serialized.kind
 	if not deserializers[stype] then
 		error("No deserializer implemented for type: " .. tostring(stype))
-	end
-	return deserializers[stype](state, id)
-end
-
----serialize a value of a known type
----@param state SerializationState
----@param stype Type
----@param subject any
----@return SerializedID
-local function serialize_known(state, stype, subject)
-	if subject == nil then
-		error("Cannot serialize nil value")
-	end
-	if not serializers[stype] then
-		error("Known type has no serializer implemented: " .. tostring(stype))
-	end
-	return serializers[stype](state, subject)
-end
-
----deserialize a value of a known type
----@param state SerializationState
----@param stype Type
----@param id SerializedID
----@return any
-local function deserialize_known(state, stype, id)
-	if not deserializers[stype] then
-		error("Known type has no deserializer implemented: " .. tostring(stype))
 	end
 	return deserializers[stype](state, id)
 end
@@ -267,33 +228,12 @@ local serialize_deriver = {
 			end
 		end
 
-		if fail then
-			error(fail)
-		end
-
-		-- deserializers[t] = function(state, id)
-		-- 	local serialized = state.construction[id]
-		-- 	local vname = serialized.kind:sub(#name + 2)
-		-- 	local vdata = variants[vname]
-		-- 	if not vdata then
-		-- 		error("Unknown variant '" .. vname .. "' for enum '" .. name .. "'")
-		-- 	end
-		-- 	local deserialized = { kind = serialized.kind }
-
-		-- 	if vdata.type == derivers.EnumDeriveInfoVariantKind.Record then
-		-- 		for i, param in ipairs(vdata.info.params) do
-		-- 			deserialized[param] = deserialize(state, serialized.args[i])
-		-- 		end
-		-- 	end
-
-		-- 	return setmetatable(deserialized, t)
-		-- end
-
 		already_derived[t] = true
 	end,
 	foreign = function()
 		error("can't derive :serialize() for a foreign type")
 	end,
+	--FIXME: idk if this is right or how to test
 	map = function(t, info)
 		if already_derived[t] then
 			return
@@ -330,6 +270,7 @@ local serialize_deriver = {
 
 		already_derived[t] = true
 	end,
+	--FIXME: idk if this is right or how to test
 	set = function(t, info)
 		if already_derived[t] then
 			return
@@ -360,6 +301,7 @@ local serialize_deriver = {
 
 		already_derived[t] = true
 	end,
+	--FIXME: idk if this is right or how to test
 	array = function(t, info)
 		if already_derived[t] then
 			return
@@ -398,6 +340,8 @@ return {
 		local state = { construction = {}, lookup = {} }
 		local id = serialize(state, term)
 		--assert(id == 1)
+		--FIXME: ???
+		-- is this API right now?
 		return state
 	end,
 	deserialize = function(state)
