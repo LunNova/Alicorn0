@@ -134,7 +134,8 @@ end
 ---@return any
 local function deserialize(state, id)
 	if type(id) ~= "number" then
-		error("Invalid serialization ID: expected number, got " .. type(id))
+		--error("Invalid serialization ID: expected number, got " .. type(id))
+		return id
 	end
 	if id < 1 or id > #state.construction then
 		error("Invalid serialization ID: out of range")
@@ -202,13 +203,13 @@ local serialize_deriver = {
 			return #state.construction
 		end
 
-		deserializers[t] = function(state, id)
+		deserializers[kind] = function(state, id)
 			local serialized = state.construction[id]
 			local deserialized = {}
 			for i, param in ipairs(params) do
 				deserialized[i] = deserialize(state, serialized.args[i])
 			end
-			return t(deserialized)
+			return t(table.unpack(deserialized))
 		end
 
 		t.derived_serialize = true
@@ -253,38 +254,59 @@ local serialize_deriver = {
 		end
 
 		-- Generate variant-specific deserializers
-		for vname, vdata in pairs(variants) do
-			local full_name = name .. "." .. vname
-			deserializers[full_name] = function(state, id)
-				local serialized = state.construction[id]
-				local deserialized = {}
-				for i, param in ipairs(vdata.info.params) do
-					-- print("Calling deserialize for arg ", serialized.args[i])
-					deserialized[i] = deserialize(state, serialized.args[i])
-					-- print("Got ", deserialized[i], type(deserialized[i]))
-				end
-				-- print("Calling constructor for " .. full_name)
-				return t[vname](table.unpack(deserialized))
-			end
-		end
-
-		deserializers[t] = function(state, id)
-			local serialized = state.construction[id]
-			local vname = serialized.kind:sub(#name + 2)
+		for vidx, vname in ipairs(variants) do
 			local vdata = variants[vname]
-			if not vdata then
-				error("Unknown variant '" .. vname .. "' for enum '" .. name .. "'")
-			end
-			local deserialized = { kind = serialized.kind }
+			local full_name = name .. "." .. vname
 
 			if vdata.type == derivers.EnumDeriveInfoVariantKind.Record then
-				for i, param in ipairs(vdata.info.params) do
-					deserialized[param] = deserialize(state, serialized.args[i])
+				deserializers[full_name] = function(state, id)
+					local serialized = state.construction[id]
+					local deserialized = {}
+					for i, param in ipairs(vdata.info.params) do
+						-- print("Calling deserialize for arg ", serialized.args[i])
+						deserialized[i] = deserialize(state, serialized.args[i])
+						-- print("Got ", deserialized[i], type(deserialized[i]))
+					end
+					-- print("Calling constructor for " .. full_name)
+					return t[vname](table.unpack(deserialized))
 				end
+			elseif vdata.type == derivers.EnumDeriveInfoVariantKind.Unit then
+				deserializers[full_name] = function(state, id)
+					return t[vname]
+				end
+			else
+				error(
+					"NYI Can't generate deserializer for variant "
+						.. vname
+						.. " of enum "
+						.. name
+						.. " with variant type "
+						.. vdata.type
+				)
 			end
-
-			return setmetatable(deserialized, t)
 		end
+
+		if fail then
+			error(fail)
+		end
+
+		-- deserializers[t] = function(state, id)
+		-- 	local serialized = state.construction[id]
+		-- 	local vname = serialized.kind:sub(#name + 2)
+		-- 	local vdata = variants[vname]
+		-- 	if not vdata then
+		-- 		error("Unknown variant '" .. vname .. "' for enum '" .. name .. "'")
+		-- 	end
+		-- 	local deserialized = { kind = serialized.kind }
+
+		-- 	if vdata.type == derivers.EnumDeriveInfoVariantKind.Record then
+		-- 		for i, param in ipairs(vdata.info.params) do
+		-- 			deserialized[param] = deserialize(state, serialized.args[i])
+		-- 		end
+		-- 	end
+
+		-- 	return setmetatable(deserialized, t)
+		-- end
 
 		t.derived_serialize = true
 	end,
