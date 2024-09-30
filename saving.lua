@@ -4,7 +4,7 @@ local derivers = require "derivers"
 
 -- the state is a combination of what needs to actually be saved
 -- and lookup tables
--- after finsih loading stuff in to serialization state
+-- after finishing loading stuff into serialization state
 -- create object storing just stuff to store
 -- can toss the whole thing to json
 
@@ -28,6 +28,8 @@ local derivers = require "derivers"
 ---@field metavariable_lookup {[Metavariable] : integer}
 ---@field metavariable_count integer
 ---@field enums {[string] : EnumSerializationState}
+---@field construction any[]
+---@field lookup {[any] : integer}
 
 ---@alias SerializedID integer
 
@@ -128,7 +130,13 @@ local function deserialize(state, id)
 	if not deserializers[stype] then
 		error("No deserializer implemented for type: " .. tostring(stype))
 	end
-	return deserializers[stype](state, id)
+	local result = deserializers[stype](state, id)
+	-- If the result is a number and it's within the range of the construction array,
+	-- return the constructed object instead of the ID
+	if type(result) == "number" and result >= 1 and result <= #state.construction then
+		return state.construction[result]
+	end
+	return result
 end
 
 ---serialize a value of a known type
@@ -182,18 +190,13 @@ local serialize_deriver = {
 			return #state.construction
 		end
 
-		deserializers[t] = function(state, id)
+		deserializers[kind] = function(state, id)
 			local serialized = state.construction[id]
 			local deserialized = {}
 			for i, param in ipairs(params) do
 				deserialized[param] = deserialize(state, serialized.args[i])
 			end
 			return setmetatable(deserialized, t)
-		end
-
-		idx.serialize = function(self)
-			local state = { construction = {}, lookup = {} }
-			return serialize(state, self), state
 		end
 
 		t.derived_serialize = true
@@ -237,7 +240,7 @@ local serialize_deriver = {
 			return #state.construction
 		end
 
-		deserializers[t] = function(state, id)
+		deserializers[name] = function(state, id)
 			local serialized = state.construction[id]
 			local vname = serialized.kind:sub(#name + 2)
 			local vdata = variants[vname]
@@ -253,11 +256,6 @@ local serialize_deriver = {
 			end
 
 			return setmetatable(deserialized, t)
-		end
-
-		idx.serialize = function(self)
-			local state = { construction = {}, lookup = {} }
-			return serialize(state, self), state
 		end
 
 		t.derived_serialize = true
@@ -299,11 +297,6 @@ local serialize_deriver = {
 			return deserialized
 		end
 
-		idx.serialize = function(self)
-			local state = { construction = {}, lookup = {} }
-			return serialize(state, self), state
-		end
-
 		t.derived_serialize = true
 	end,
 	set = function(t, info)
@@ -332,11 +325,6 @@ local serialize_deriver = {
 				deserialized:put(deserialize(state, arg))
 			end
 			return deserialized
-		end
-
-		idx.serialize = function(self)
-			local state = { construction = {}, lookup = {} }
-			return serialize(state, self), state
 		end
 
 		t.derived_serialize = true
@@ -369,22 +357,19 @@ local serialize_deriver = {
 			return deserialized
 		end
 
-		methods.serialize = function(self)
-			local state = { construction = {}, lookup = {} }
-			return serialize(state, self), state
-		end
-
 		t.derived_serialize = true
 	end,
 }
 
 -- Export the necessary functions and tables
 return {
-	serialize = serialize,
-	deserialize = deserialize,
-	serialize_known = serialize_known,
-	deserialize_known = deserialize_known,
-	serializers = serializers,
-	deserializers = deserializers,
+	serialize = function(term)
+		local state = { construction = {}, lookup = {} }
+		local id = serialize(state, term)
+		return state
+	end,
+	deserialize = function(state)
+		return deserialize(state, #state.construction)
+	end,
 	serialize_deriver = serialize_deriver,
 }

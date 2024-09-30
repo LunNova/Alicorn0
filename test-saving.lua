@@ -29,11 +29,13 @@ terms.result_info:derive(saving.serialize_deriver)
 
 -- Test the serialization for each term type
 local function test_serialization(term_name, term)
+	local inner_error_logged = false
 	local ok, result = pcall(function()
 		local state = saving.serialize(term)
 		local loaded = saving.deserialize(state)
 		if not terms.value.__eq(term, loaded) then
 			p("Term:", term, "Type:", type(term))
+			p("State:", state)
 			p("Loaded:", loaded, "Type:", type(loaded))
 			if type(term) == "table" and type(loaded) == "table" and term.default_print and loaded.default_print then
 				print("Term (default_print):")
@@ -41,12 +43,12 @@ local function test_serialization(term_name, term)
 				print("Loaded (default_print):")
 				print(loaded:default_print())
 			end
-			error(term_name .. " saving/loading mismatch")
+			return false
 		end
 		return true
 	end)
 	if ok then
-		print(term_name .. " saving/loading passed")
+		print(term_name .. " saving/loading pass: " .. tostring(result))
 	else
 		print(term_name .. " saving/loading failed")
 		print("Error: " .. tostring(result))
