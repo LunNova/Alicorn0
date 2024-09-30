@@ -40,62 +40,64 @@ local deserializers = {}
 
 -- Serializers for Lua built-in types
 
-serializers["number"] = function(state, subject)
-	return subject -- Numbers can be serialized as-is
+serializers["__number"] = function(state, subject)
+	local serialized = { kind = "__number", value = subject }
+	table.insert(state.construction, serialized)
+	return #state.construction
 end
 
-serializers["string"] = function(state, subject)
+serializers["__string"] = function(state, subject)
 	return subject -- Strings can be serialized as-is
 end
 
-serializers["boolean"] = function(state, subject)
+serializers["__boolean"] = function(state, subject)
 	return subject -- Booleans can be serialized as-is
 end
 
-serializers["nil"] = function(state, subject)
+serializers["__nil"] = function(state, subject)
 	return subject -- nil can be serialized as-is
 end
 
 -- Deserializers for Lua built-in types
 
-deserializers["number"] = function(state, id)
-	return id -- Numbers can be deserialized as-is
+deserializers["__number"] = function(state, id)
+	return state.construction[id].value
 end
 
-deserializers["string"] = function(state, id)
+deserializers["__string"] = function(state, id)
 	return id -- Strings can be deserialized as-is
 end
 
-deserializers["boolean"] = function(state, id)
+deserializers["__boolean"] = function(state, id)
 	return id -- Booleans can be deserialized as-is
 end
 
-deserializers["nil"] = function(state, id)
+deserializers["__nil"] = function(state, id)
 	return id -- nil can be deserialized as-is
 end
 
 -- Handle tables (non-metatabled)
-serializers["table"] = function(state, subject)
-	local serialized = {}
-	for k, v in pairs(subject) do
-		if k == nil then
-			error("Cannot serialize table with nil key")
-		end
-		if v == nil then
-			error("Cannot serialize table with nil value")
-		end
-		serialized[serialize(state, k)] = serialize(state, v)
-	end
-	return serialized
-end
+-- serializers["table"] = function(state, subject)
+-- 	local serialized = {}
+-- 	for k, v in pairs(subject) do
+-- 		if k == nil then
+-- 			error("Cannot serialize table with nil key")
+-- 		end
+-- 		if v == nil then
+-- 			error("Cannot serialize table with nil value")
+-- 		end
+-- 		serialized[serialize(state, k)] = serialize(state, v)
+-- 	end
+-- 	return serialized
+-- end
 
-deserializers["table"] = function(state, id)
-	local deserialized = {}
-	for k, v in pairs(id) do
-		deserialized[deserialize(state, k)] = deserialize(state, v)
-	end
-	return deserialized
-end
+-- deserializers["table"] = function(state, id)
+-- 	local deserialized = {}
+-- 	for k, v in pairs(id) do
+-- 		deserialized[deserialize(state, k)] = deserialize(state, v)
+-- 	end
+-- 	return deserialized
+-- end
 
 ---serialize a value of unknown type
 ---@param state SerializationState
@@ -108,11 +110,22 @@ local function serialize(state, subject)
 	local stype = type(subject)
 	if stype == "table" then
 		stype = getmetatable(subject) or "table"
+	else
+		stype = "__" .. stype
 	end
 	if not serializers[stype] then
 		error("No serializer implemented for type: " .. tostring(stype))
 	end
-	return serializers[stype](state, subject)
+
+	-- Check if the subject has already been serialized
+	if state.lookup[subject] then
+		return state.lookup[subject]
+	end
+
+	-- Serialize the subject and store the ID
+	local id = serializers[stype](state, subject)
+	state.lookup[subject] = id
+	return id
 end
 
 ---deserialize a value of unknown type
@@ -120,23 +133,22 @@ end
 ---@param id SerializedID
 ---@return any
 local function deserialize(state, id)
-	local stype = type(id)
-	if stype == "table" then
-		if not id.kind then
-			error("Invalid serialization ID: missing 'kind' field")
-		end
-		stype = id.kind
+	if type(id) ~= "number" then
+		error("Invalid serialization ID: expected number, got " .. type(id))
 	end
+	if id < 1 or id > #state.construction then
+		error("Invalid serialization ID: out of range")
+	end
+	local serialized = state.construction[id]
+	if type(serialized) ~= "table" or not serialized.kind then
+		error("Invalid serialized object: missing 'kind' field")
+	end
+	-- p(serialized)
+	local stype = serialized.kind
 	if not deserializers[stype] then
 		error("No deserializer implemented for type: " .. tostring(stype))
 	end
-	local result = deserializers[stype](state, id)
-	-- If the result is a number and it's within the range of the construction array,
-	-- return the constructed object instead of the ID
-	if type(result) == "number" and result >= 1 and result <= #state.construction then
-		return state.construction[result]
-	end
-	return result
+	return deserializers[stype](state, id)
 end
 
 ---serialize a value of a known type
@@ -190,13 +202,13 @@ local serialize_deriver = {
 			return #state.construction
 		end
 
-		deserializers[kind] = function(state, id)
+		deserializers[t] = function(state, id)
 			local serialized = state.construction[id]
 			local deserialized = {}
 			for i, param in ipairs(params) do
-				deserialized[param] = deserialize(state, serialized.args[i])
+				deserialized[i] = deserialize(state, serialized.args[i])
 			end
-			return setmetatable(deserialized, t)
+			return t(deserialized)
 		end
 
 		t.derived_serialize = true
@@ -240,7 +252,23 @@ local serialize_deriver = {
 			return #state.construction
 		end
 
-		deserializers[name] = function(state, id)
+		-- Generate variant-specific deserializers
+		for vname, vdata in pairs(variants) do
+			local full_name = name .. "." .. vname
+			deserializers[full_name] = function(state, id)
+				local serialized = state.construction[id]
+				local deserialized = {}
+				for i, param in ipairs(vdata.info.params) do
+					-- print("Calling deserialize for arg ", serialized.args[i])
+					deserialized[i] = deserialize(state, serialized.args[i])
+					-- print("Got ", deserialized[i], type(deserialized[i]))
+				end
+				-- print("Calling constructor for " .. full_name)
+				return t[vname](table.unpack(deserialized))
+			end
+		end
+
+		deserializers[t] = function(state, id)
 			local serialized = state.construction[id]
 			local vname = serialized.kind:sub(#name + 2)
 			local vdata = variants[vname]
@@ -366,6 +394,7 @@ return {
 	serialize = function(term)
 		local state = { construction = {}, lookup = {} }
 		local id = serialize(state, term)
+		--assert(id == 1)
 		return state
 	end,
 	deserialize = function(state)
