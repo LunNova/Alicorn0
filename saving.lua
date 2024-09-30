@@ -41,6 +41,8 @@ local deserializers = {}
 -- Serializers for Lua built-in types
 
 serializers["__number"] = function(state, subject)
+	-- FIXME: this is a hack to allow serializing numbers when serialization IDs are also numbers
+	-- it's silly
 	local serialized = { kind = "__number", value = subject }
 	table.insert(state.construction, serialized)
 	return #state.construction
@@ -75,29 +77,6 @@ end
 deserializers["__nil"] = function(state, id)
 	return id -- nil can be deserialized as-is
 end
-
--- Handle tables (non-metatabled)
--- serializers["table"] = function(state, subject)
--- 	local serialized = {}
--- 	for k, v in pairs(subject) do
--- 		if k == nil then
--- 			error("Cannot serialize table with nil key")
--- 		end
--- 		if v == nil then
--- 			error("Cannot serialize table with nil value")
--- 		end
--- 		serialized[serialize(state, k)] = serialize(state, v)
--- 	end
--- 	return serialized
--- end
-
--- deserializers["table"] = function(state, id)
--- 	local deserialized = {}
--- 	for k, v in pairs(id) do
--- 		deserialized[deserialize(state, k)] = deserialize(state, v)
--- 	end
--- 	return deserialized
--- end
 
 ---serialize a value of unknown type
 ---@param state SerializationState
